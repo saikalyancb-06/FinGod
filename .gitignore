@@ -1,0 +1,99 @@
+# =============================================================================
+# FinLens & Money Mule Detection: .gitignore
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Secrets & local configuration: NEVER commit
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+.secrets/
+
+# ---------------------------------------------------------------------------
+# Runtime data: customer/investigation data, created when the apps run
+# (each product keeps its own SQLite store; WAL/SHM are SQLite side files)
+# ---------------------------------------------------------------------------
+data/stores/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Throwaway stores created by tests / experiments
+data/test_stores_*/
+data/live_*/
+
+# Regenerable synthetic training data (python -m ml.train_mule_model / ml.train_credit_model)
+data/generated/
+
+# Keep committed on purpose:
+#   data/samples/      synthetic demo statements, PDFs, labels, demo accounts
+#   ml/artifacts/      trained models + metrics (small; needed to run without retraining)
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Node / frontend
+# ---------------------------------------------------------------------------
+node_modules/
+frontend/dist/
+frontend/.vite/
+.npm-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Reference clones of the team's other repos (muleguard, mr-mule, cred-wise)
+# Re-clone with: git clone https://github.com/SamratSK/<repo> reference/<repo>
+# ---------------------------------------------------------------------------
+reference/
+
+# ---------------------------------------------------------------------------
+# Logs & temp
+# ---------------------------------------------------------------------------
+*.log
+logs/
+tmp/
+*.tmp
+
+# ---------------------------------------------------------------------------
+# Editors, OS & tooling
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+.claude/settings.local.json

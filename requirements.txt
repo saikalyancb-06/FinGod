@@ -1,0 +1,44 @@
+# =============================================================================
+# FinLens & Money Mule Detection: Python runtime dependencies
+# -----------------------------------------------------------------------------
+# Python : 3.13 (tested with 3.13.1 on Windows 11)
+# Install: python -m pip install -r requirements.txt
+# Dev/test extras: python -m pip install -r requirements-dev.txt
+# Versions are pinned to the exact set verified on the development machine.
+# =============================================================================
+
+# --- API layer (both services: finlens.main:app on 8001, mule.main:app on 8002)
+fastapi==0.143.1
+starlette==1.8.0            # FastAPI's ASGI toolkit (pinned for reproducibility)
+uvicorn==0.34.2             # ASGI server
+pydantic==2.14.1            # request/response validation
+email-validator==2.3.0      # EmailStr on FinLens sign-up
+python-multipart==0.0.20    # file uploads (statements, datasets, label files)
+python-dotenv==1.0.1        # loads the project-level .env
+
+# --- Storage (separate SQLite files per product; PostgreSQL via *_DATABASE_URL)
+SQLAlchemy==2.0.40
+
+# --- Data processing & analytics
+pandas==2.2.3
+numpy==2.2.6
+
+# --- Machine learning (mule classifier, credit risk band) & graph analytics
+scikit-learn==1.7.2
+scipy==1.15.2               # scikit-learn dependency (pinned)
+xgboost==3.2.0
+joblib==1.4.2               # model artifact (de)serialisation
+networkx==3.6.1             # account graph, PageRank, cycles, ego networks
+
+# --- External services: Groq LLM + SerpAPI search (plain HTTPS, no vendor SDKs)
+httpx==0.28.1
+
+# --- Security: Fernet encryption of uploaded files / descriptions / account IDs
+cryptography==49.0.0
+
+# --- PDF statement parsing (both engines are used; best result wins)
+PyMuPDF==1.28.0             # import name: fitz (sorted text + find_tables)
+pdfplumber==0.11.10         # second text/table extractor
+
+# --- Optional: PostgreSQL instead of SQLite (uncomment and set *_DATABASE_URL)
+# psycopg2-binary==2.9.10

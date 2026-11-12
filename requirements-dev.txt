@@ -1,0 +1,7 @@
+# Development & test dependencies (includes all runtime requirements)
+# Install: python -m pip install -r requirements-dev.txt
+# Run tests: python -m pytest
+-r requirements.txt
+
+pytest==8.3.5
+pytest-asyncio==0.26.0      # configured in pytest.ini (loop scope = function)

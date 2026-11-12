@@ -1,0 +1,46 @@
+description,type,expected_category
+UPI/SWIGGY/ORDER 88213,debit,Food
+ZOMATO ONLINE ORDER,debit,Food
+CAFE COFFEE DAY,debit,Food
+BLINKIT GROCERY,debit,Food
+DOMINOS PIZZA ONLINE,debit,Food
+COLLEGE CANTEEN UPI,debit,Food
+BMRCL METRO CARD RECHARGE,debit,Transportation
+UBER INDIA TRIP,debit,Transportation
+OLA CABS RIDE,debit,Transportation
+HPCL PETROL PUMP,debit,Transportation
+IRCTC E-TICKET,debit,Transportation
+RAPIDO BIKE TAXI,debit,Transportation
+MYNTRA CLOTHING ORDER,debit,Shopping
+AMAZON PAY ORDER,debit,Shopping
+FLIPKART INTERNET PVT,debit,Shopping
+DECATHLON SPORTS,debit,Shopping
+CROMA ELECTRONICS,debit,Shopping
+NETFLIX SUBSCRIPTION,debit,Entertainment
+SPOTIFY INDIA,debit,Entertainment
+BOOKMYSHOW MOVIE,debit,Entertainment
+PVR CINEMAS,debit,Entertainment
+STEAM GAMING PURCHASE,debit,Entertainment
+COURSERA COURSE FEE,debit,Education
+UDEMY COURSE,debit,Education
+COLLEGE FEE PAYMENT,debit,Education
+SAPNA BOOK HOUSE,debit,Education
+HOSTEL RENT SUNRISE PG,debit,Accommodation & Utilities
+BESCOM ELECTRICITY,debit,Accommodation & Utilities
+JIO PREPAID RECHARGE,debit,Accommodation & Utilities
+AIRTEL BROADBAND BILL,debit,Accommodation & Utilities
+APOLLO PHARMACY,debit,Healthcare
+MEDPLUS PHARMACY,debit,Healthcare
+CITY CLINIC CONSULTATION,debit,Healthcare
+UPI TO ANANYA GIFT,debit,Transfers & Other
+ATM CASH WITHDRAWAL,debit,Transfers & Other
+EMI CONSUMER LOAN,debit,Transfers & Other
+COCA COLA VENDING,debit,Uncertain
+POS 4421 SHREE ENTERPRISES,debit,Uncertain
+BUSINESS CENTRE PRINTING,debit,Uncertain
+NEFT CR SALARY ACME,credit,Income
+MONTHLY ALLOWANCE FROM PARENT,credit,Income
+AMAZON REFUND,credit,Refund
+TRANSFER FROM SAVINGS A/C SELF,credit,Own transfer
+UPI FROM RAHUL TRIP SHARE,credit,Transfers in
+CASH DEPOSIT,credit,Uncertain
