@@ -32,6 +32,10 @@ data/live_*/
 # Regenerable synthetic training data (python -m ml.train_mule_model / ml.train_credit_model)
 data/generated/
 
+# Downloaded public training datasets (~6 GB) + cached features/logs
+# Re-download with: python -m ml.download_datasets
+data/external/
+
 # Keep committed on purpose:
 #   data/samples/      synthetic demo statements, PDFs, labels, demo accounts
 #   ml/artifacts/      trained models + metrics (small; needed to run without retraining)
@@ -75,6 +79,7 @@ pnpm-debug.log*
 # ---------------------------------------------------------------------------
 # Reference clones of the team's other repos (muleguard, mr-mule, cred-wise)
 # Re-clone with: git clone https://github.com/SamratSK/<repo> reference/<repo>
+# (the mr-mule test sender we actually use, with its visual page, lives in tools/mr-mule/)
 # ---------------------------------------------------------------------------
 reference/
 
@@ -96,4 +101,5 @@ tmp/
 .DS_Store
 Thumbs.db
 desktop.ini
-.claude/settings.local.json
+# local assistant/editor config (contains machine-specific paths)
+.claude/

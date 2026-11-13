@@ -5,12 +5,18 @@ $root = $PSScriptRoot
 $py = if ($env:FINLENS_PYTHON) { $env:FINLENS_PYTHON } else { "C:\Users\cbsai\AppData\Local\Programs\Python\Python313\python.exe" }
 if (-not (Test-Path $py)) { $py = "python" }
 
+# Trained models ship in ml/artifacts. Only if they are missing:
+#   - with the public datasets present (python -m ml.download_datasets, ~6 GB) -> train on real-scale data
+#   - otherwise -> quick synthetic fallback so the app still runs
 if (-not (Test-Path "$root\ml\artifacts\mule_model.joblib") -or -not (Test-Path "$root\ml\artifacts\credit_model.joblib")) {
-  Write-Host "Training models on synthetic data (first run)..."
   Push-Location $root
-  & $py -m ml.generate_finlens_samples
-  & $py -m ml.train_mule_model
-  & $py -m ml.train_credit_model
+  if (-not (Test-Path "$root\data\samples\mule_demo_transactions.csv")) { & $py -m ml.generate_finlens_samples; & $py -m ml.train_mule_model }
+  if (Test-Path "$root\data\external\lending_club\accepted_2007_to_2018Q4.csv") {
+    Write-Host "Training credit model on Lending Club (real outcomes)..."; & $py -m ml.train_credit_lendingclub
+  } else { & $py -m ml.train_credit_model; Copy-Item "$root\ml\artifacts\credit_model_synthetic.joblib" "$root\ml\artifacts\credit_model.joblib" }
+  if (Test-Path "$root\data\external\ibm_aml\HI-Medium_Trans.csv") {
+    Write-Host "Training mule model on IBM AMLworld (~15 min)..."; & $py -m ml.train_mule_ibm
+  } else { & $py -m ml.train_mule_model; Copy-Item "$root\ml\artifacts\mule_model_synthetic.joblib" "$root\ml\artifacts\mule_model.joblib" }
   Pop-Location
 }
 if (-not (Test-Path "$root\frontend\node_modules")) {

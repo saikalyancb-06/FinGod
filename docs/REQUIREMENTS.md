@@ -17,6 +17,7 @@ Status legend: ✅ implemented and tested · 🟡 implemented with a documented 
 | **Node.js** | **≥ 18** (verified 22.20) | React frontend (Vite 5) | npm 10 |
 | Python packages | see `requirements.txt` (pinned) | API, analytics, ML, PDF | `pip install -r requirements.txt` |
 | Dev/test packages | see `requirements-dev.txt` | pytest | `pip install -r requirements-dev.txt` |
+| Training packages | see `requirements-train.txt` | dataset download (Hugging Face Hub) + fast CSV/parquet (pyarrow) | `pip install -r requirements-train.txt` |
 | Frontend packages | see `frontend/package.json` (pinned) | React 18, React Router 6, Recharts 2, Cytoscape 3, Vite 5 | `npm install` in `frontend/` |
 | PostgreSQL | optional, 14+ | production-style storage | Default is SQLite (no install). Set `FINLENS_DATABASE_URL` / `MULE_DATABASE_URL` and add `psycopg2-binary` |
 | Node (for mr-mule live feed) | optional, ≥ 18 | demo live transaction stream | `reference/mr-mule` → `npm install && npm start` |
@@ -26,8 +27,8 @@ Status legend: ✅ implemented and tested · 🟡 implemented with a documented 
 | Resource | Minimum | Notes |
 |---|---|---|
 | CPU | 2 cores | Mule analysis of ~8,400 transactions / ~370 accounts takes about 2–3 s |
-| RAM | 4 GB | Training both models uses about 1 GB peak |
-| Disk | ~500 MB | Includes `frontend/node_modules`; databases are small (MBs) |
+| RAM | 4 GB to run; **16 GB to retrain** | Mule training on 31.9M transactions peaks at roughly 8–10 GB |
+| Disk | ~500 MB to run; **~10 GB to retrain** | Running includes `frontend/node_modules`. Retraining downloads ~6 GB of datasets plus a feature cache |
 | Network | needed only for Groq + SerpAPI | Everything else works offline |
 
 ### 1.3 Ports
@@ -47,6 +48,7 @@ Status legend: ✅ implemented and tested · 🟡 implemented with a documented 
 | `GROQ_MODEL` | optional | Preferred model (default `openai/gpt-oss-120b`) | Auto-falls back to an available model |
 | `SERP_API` | recommended | Live restaurant (Google Maps) and product (Google Shopping) listings | Clearly labelled **DEMO catalog** |
 | `DEFAULT_LOCATION` | optional | Restaurant search location | `Bengaluru, Karnataka, India` |
+| `SARVAM_API_KEY` | optional | Hindi/Kannada translation and voice (Sarvam AI) | English only; voice buttons report that the key is missing |
 | `LOAN_API_BASE_URL` | optional | The team's existing CredWise loan-approval model API | Side panel shows "not configured" |
 | `FINLENS_SECRET`, `MULE_SECRET` | change for any shared deployment | Token signing (separate per product) | Dev defaults |
 | `FINLENS_DATA_KEY`, `MULE_DATA_KEY` | change for any shared deployment | At-rest encryption keys (separate per product) | Dev defaults |
@@ -82,9 +84,19 @@ Groq's free tier allows about 8,000 tokens per minute. The client waits the advi
 | FL-19 | EMI by the reducing-balance formula, with simulation and amortisation | §06 | ✅ | `GET /api/credit/emi` |
 | FL-20 | Stress tests (income −20%, essential costs +15%, rate +2 pts, combined) | §06 | ✅ | `credit.py::assess` |
 | FL-21 | Output: status (eligible / conditional / not affordable / insufficient information), affordable EMI, illustrative loan sizes, supporting and limiting factors, missing info | §06 | ✅ | `POST /api/credit/assess` |
-| FL-22 | Model-validation rule: the model's label must be stated; no claim of proven default prediction | §06, §10 | ✅ synthetic simulated-repayment label, model card | `docs/CREDIT_MODEL_CARD.md` |
+| FL-22 | Model-validation rule: the model's label must be stated; no claim of proven default prediction | §06, §10 | ✅ real repayment label (1.32M Lending Club loans), out-of-time test, leakage audit, model card | `ml/train_credit_lendingclub.py`, `docs/CREDIT_MODEL_CARD.md` |
 | FL-23 | Separate explicit consent per purpose (analytics, smart spending, credit) | §08, §11 | ✅ | `POST /api/consents` |
 | FL-24 | Users can delete their data and their account | §11 | ✅ | `DELETE /api/data`, `DELETE /api/account` |
+| FL-26 | Personal profile captured at onboarding (occupation, income sources, payday, living, fixed costs, goal, diet, sizes, priorities) and used by every feature | user request | ✅ | `finlens/profile.py`, `ProfileWizard.jsx` |
+| FL-27 | Goals with deadlines and pace drive budgets, recommendations and answers (reserved savings, tighter budgets when behind, per-purchase goal impact, realistic-date warning) | §04 + user request | ✅ | `finlens/goals.py`, `finlens/room.py` |
+| FL-28 | Smart Spending uses balance/safe-to-spend/usual spend to suggest and sanity-check budgets; group orders handled per person | §05 + user request | ✅ | `smart_spending.py`, `room.py` |
+| FL-29 | Built-in lender-style approval estimate (replaces the unavailable CredWise API) with explanations and improvement tips | extension | ✅ 92.2% test accuracy | `finlens/lender.py`, `ml/train_lender_model.py` |
+| FL-30 | Money-health verdict (healthy / steady / tight / at risk) drives answers, nudges and suggestions; the assistant never claims the user is running out of money unless the verdict says so | user request | ✅ | `analytics.py::money_health`, `assistant.py` |
+| FL-31 | Budgets above balance / safe-to-spend / plausible range require explicit confirmation before any search; typo correction offered | user request | ✅ | `smart_spending.py::budget_guard` |
+| FL-32 | Proactive, dismissible nudges and a weekly money report | extension | ✅ | `finlens/nudges.py`, `GET /api/nudges`, `GET /api/report/weekly` |
+| FL-33 | Split expenses with friends; only the user's share counts in analytics; paybacks are not income; payback detection after large payments (next 10 incoming transfers matched to an even split) | extension + user request | ✅ | `finlens/split.py`, `/api/split*` |
+| FL-34 | Credit-builder path for first-time borrowers with persisted checklist and lender-model timeline | extension | ✅ | `finlens/credit_builder.py`, `/api/credit/builder` |
+| FL-35 | Hindi and Kannada (translation) and voice input/output | extension | ✅ requires `SARVAM_API_KEY` | `shared/sarvam.py`, `/api/voice/*`, `frontend/src/i18n.jsx`, `voice.jsx` |
 | FL-25 | Live Account Aggregator integration | §03 | ⏭️ future; CSV/PDF upload only, no bank passwords | n/a |
 
 ## 3. Functional requirements: Money Mule Detection (B2B)
@@ -104,8 +116,9 @@ Groq's free tier allows about 8,000 tokens per minute. The client waits the advi
 | MM-11 | Restricted account identifiers | §11 | ✅ aliases by default; lead-only reveal with logged reason | `POST …/reveal` |
 | MM-12 | Fraud-ring candidates with risk scores and a MuleGuard-format JSON export | extension | ✅ | `/rings`, `/export.json` |
 | MM-13 | Live ingest from a WebSocket CSV feed (mr-mule compatible) | extension | ✅ | `POST /api/datasets/live`, `/append` |
+| MM-16 | Built-in live simulator with realistic account history, on-demand pattern injection, WebSocket alert push (toasts) and animated money-trail replay | extension | ✅ | `mule/live.py`, `/api/live/*`, `/ws/live/{id}`, `LiveContext.jsx`, `Graph.jsx` |
 | MM-14 | Evaluation against labels: precision, recall, PR-AUC, false-positive rate; never accuracy alone | §10 | ✅ | `POST /api/datasets/{id}/evaluate`, `docs/MULE_MODEL_CARD.md` |
-| MM-15 | Synthetic AML scenarios with known patterns (AMLSim-style) | §10 | ✅ | `ml/generate_mule_data.py` |
+| MM-15 | Use the public AML benchmark (AMLworld/AMLSim) and synthetic scenarios with known patterns | §10 | ✅ trained on IBM AMLworld HI-Medium (31.9M txns), tested on HI-Small and LI-Small | `ml/train_mule_ibm.py`, `ml/generate_mule_data.py` |
 
 ## 4. Non-functional requirements
 

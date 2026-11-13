@@ -31,10 +31,12 @@ export default function AccountView() {
         <Stat color="emerald" icon="📥" label="Total in" value={a.totals.in} format={inr} />
         <Stat color="coral" icon="📤" label="Total out" value={a.totals.out} format={inr} />
         <Stat color="sky" icon="👥" label="Counterparties" value={a.senders.length + a.receivers.length} format={(v) => Math.round(v)} />
-        <Stat color="saffron" icon="🧠" label="ML score" value={a.model_score} format={(v) => v.toFixed(2)} />
+        {a.model_applicable === false
+          ? <Stat color="saffron" icon="🧠" label="ML score" value="not used" sub="dataset too small for the model" />
+          : <Stat color="saffron" icon="🧠" label="ML score" value={a.model_score} format={(v) => v.toFixed(2)} />}
       </div>
       <div className="card reveal"><div className="row between"><h3>🕸️ Network</h3><GraphLegend /></div>
-        {g ? <Graph data={g} height={420} onSelect={(n) => !n.focus && nav(`/institution/accounts/${ds}/${n.id}`)} /> : <div className="skeleton" style={{ height: 420 }} />}</div>
+        {g ? <Graph data={g} height={420} loadTrail={() => inst.get(`/datasets/${ds}/trail?account=${alias}`)} onSelect={(n) => !n.focus && nav(`/institution/accounts/${ds}/${n.id}`)} /> : <div className="skeleton" style={{ height: 420 }} />}</div>
       <div className="grid g3 stagger">
         <div className="card"><h3>⬅️ Top senders</h3>{cp(a.senders, "var(--emerald)")}</div>
         <div className="card"><h3>➡️ Top receivers</h3>{cp(a.receivers, "var(--coral)")}</div>

@@ -1,30 +1,39 @@
-# Cash-flow Repayment-Risk Model — Model Card
+# Repayment-Risk Model — Model Card
 
-**Version:** credit-lr-202611130007 · trained 2026-11-13 00:07:49
+**Version:** credit-xgb-lc-202611131919 · trained 2026-11-13 19:19:38 · 0.4 min
 
-## Purpose and limits
-A supporting signal inside FinLens Alternative Credit Intelligence. The primary
-output is the **deterministic affordability calculation** (disposable income, EMI
-headroom, stress tests). The model's risk band is shown alongside, never alone.
+## Data and label
+* **Lending Club accepted loans 2007-2018Q4 (real loans, real outcomes; CC0)**. Train: 453,805 loans issued 2007–2014; out-of-time test: 375,145 loans issued 2015;
+  final model refit on 828,950 finished loans (2007–2015).
+* **Label:** Charged Off / Default (1) vs Fully Paid (0); unfinished loans excluded — an actual **repayment outcome**, not a past approval decision.
 
-* **No existing loan model or dataset was available**, so this model was trained on synthetic data.
-* **Target:** simulated "missed two or more instalments within 12 months", a repayment-outcome label rather than past approval decisions.
-* **It does not prove default prediction.** The data is synthetic, so real-world performance is unknown.
-* It never guarantees approval. Lender underwriting is separate.
-* It never uses any AML / Money Mule signal. The two systems share no data.
+## Features (what FinLens can actually supply)
+`emi_ratio, obligation_ratio, total_debt_ratio, term_months` — scale-free ratios computed from the user's statement and requested loan.
+Interest rate, Lending Club grade **and loan-to-income** are excluded: EMI ÷ loan size at a given term reveals the
+interest rate, which Lending Club sets from its own risk grade (hidden leakage — with it the model scored 0.715,
+honest score without it is reported below). Risk is constrained to be **non-decreasing** in every feature, and app
+inputs are clipped to the training range (0.5–99.5th percentile).
 
-**Deployed model:** logistic_regression (selected by held-out PR-AUC; the simpler model won on this data).
-
-## Validation (temporal: train months 1-18, test months 19-24 (drift injected))
+## Out-of-time results (2015)
 | Model | ROC-AUC | PR-AUC | Brier |
 |---|---|---|---|
-| XGBoost | 0.7786 | 0.26 | 0.0493 |
-| Logistic regression | 0.7974 | 0.2874 | 0.0485 |
-| Constant (train event rate) | 0.5 | 0.0581 | 0.055 |
+| **Deployed** XGBoost (monotonic), FinLens features | 0.672 | 0.3513 | 0.151 |
+| Logistic regression, FinLens features | 0.671 | 0.3521 | 0.1513 |
+| Benchmark XGBoost + credit-bureau fields (not deployable) | 0.7239 | 0.4039 | 0.145 |
+| Constant baseline | 0.5 | 0.2018 | 0.1621 |
 
-Event rate: train 0.0433, test 0.0581 (drift visible).
+Observed 2015 default rate by risk band: `{"lower": 0.1132, "moderate": 0.1649, "higher": 0.3284}`
+Cross-dataset check on Home Credit (307,499 applicants, different lender/country): ROC-AUC 0.5196, PR-AUC 0.084 (base rate 0.0807).
 
-Calibration (XGBoost, quantile bins): `[{"mean_predicted": 0.004, "observed": 0.003}, {"mean_predicted": 0.007, "observed": 0.016}, {"mean_predicted": 0.012, "observed": 0.025}, {"mean_predicted": 0.017, "observed": 0.027}, {"mean_predicted": 0.026, "observed": 0.041}, {"mean_predicted": 0.039, "observed": 0.07}, {"mean_predicted": 0.065, "observed": 0.072}, {"mean_predicted": 0.176, "observed": 0.21}]`
+Calibration (deployed, quantile bins): `[{"predicted": 0.086, "observed": 0.097}, {"predicted": 0.101, "observed": 0.111}, {"predicted": 0.113, "observed": 0.125}, {"predicted": 0.124, "observed": 0.139}, {"predicted": 0.138, "observed": 0.155}, {"predicted": 0.156, "observed": 0.172}, {"predicted": 0.181, "observed": 0.199}, {"predicted": 0.214, "observed": 0.245}, {"predicted": 0.269, "observed": 0.331}, {"predicted": 0.371, "observed": 0.446}]`
 
-## Features
-`avg_monthly_income, income_cv, essential_ratio, discretionary_ratio, obligation_ratio, savings_rate, balance_to_income, cashflow_trend, months_history, proposed_emi_ratio`: all are derived from the user's own consented statement (see `finlens/credit_features.py`).
+## How it is used in FinLens
+A **supporting risk band** (lower / moderate / higher, cut at the 33rd/67th percentiles of 2015 scores) next to the
+deterministic affordability calculation, which remains the primary output. It never approves or rejects a loan and
+never uses AML data.
+
+## Limitations
+* US peer-to-peer loans (2007–2015) — borrower population, products and economy differ from Indian students/young
+  professionals; treat the band as indicative only.
+* Only affordability ratios are used, so discrimination is modest by design; the bureau benchmark shows the gap.
+* Lending Club only lists *accepted* loans (selection bias: rejected applicants have no outcomes).

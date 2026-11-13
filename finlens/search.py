@@ -70,10 +70,81 @@ def _serp(params: dict) -> tuple[dict, datetime]:
     return data, datetime.utcnow()
 
 
+FOOD_TYPE_WORDS = ("restaurant", "food", "cafe", "café", "bakery", "eatery", "dhaba", "biryani", "pizza", "burger", "canteen",
+                   "mess", "kitchen", "sweet", "juice", "dessert", "ice cream", "grill", "diner", "bistro", "takeaway", "meal",
+                   "shawarma", "momo", "tiffin", "chaat", "snack", "coffee", "tea", "brewery", "pub", "bar")
+_ZOMATO_ENTRY = re.compile(r"([A-Z0-9][^.;·|]{1,60}?)\.\s*(\d\.\d)\.\s*([^.;·|₹]{2,80}?)\.?\s*₹\s?([\d,]+)\s*for\s*(one|two)", re.I)
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())[:24]
+
+
+def _is_food_place(r: dict) -> bool:
+    blob = " ".join([str(r.get("type") or "")] + [str(t) for t in (r.get("types") or [])]).lower()
+    return any(w in blob for w in FOOD_TYPE_WORDS)
+
+
+def search_zomato_prices(query: str, location: str) -> tuple[list[dict], list[dict]]:
+    """One Google web search: Zomato delivery-listing snippets ('Name. 4.2. Cuisines. ₹300 for one')
+    and the local pack (price range per person). Returns (zomato_entries, local_places)."""
+    data, ts = _serp({"engine": "google", "q": f"{query} delivery {location} zomato", "gl": "in", "hl": "en", "num": 10})
+    stamp = ts.isoformat(timespec="seconds") + "Z"
+    entries, seen = [], set()
+    for o in data.get("organic_results", []):
+        if "zomato.com" not in str(o.get("link", "")) and "zomato" not in str(o.get("source", "")).lower():
+            continue
+        for m in _ZOMATO_ENTRY.finditer(o.get("snippet") or ""):
+            name = m.group(1).strip(" ;·-")
+            # drop a page heading glued to the first entry ("Koramangala Restaurants La Pino'z Pizza")
+            name = re.split(r"\b(?:Restaurants|Bangalore|Bengaluru|Delivery)\b[,]?\s+", name)[-1].strip(" ;·-,")
+            if _norm(name) in seen or len(name) < 3:
+                continue
+            seen.add(_norm(name))
+            amt = float(m.group(4).replace(",", ""))
+            per_one = amt / 2 if m.group(5).lower() == "two" else amt
+            entries.append({
+                "title": name, "price": per_one, "price_text": f"₹{amt:,.0f} for {m.group(5).lower()}",
+                "price_basis": "Zomato average cost per person", "rating": float(m.group(2)), "reviews": None,
+                "subtitle": m.group(3).strip(), "delivery": True, "thumbnail": None, "link": o.get("link"),
+                "source": "Zomato listing via Google (SerpAPI)", "retrieved_at": stamp, "is_demo": False,
+            })
+    places = []
+    lr = data.get("local_results")
+    for p in (lr.get("places", []) if isinstance(lr, dict) else (lr or [])):
+        places.append({"title": p.get("title"), "price_text": p.get("price"), "price": _price_from_text(p.get("price")),
+                       "type": p.get("type"), "rating": p.get("rating"), "reviews": p.get("reviews")})
+    return entries, places
+
+
+def search_food(query: str, location: str, delivery: bool = False) -> list[dict]:
+    maps = search_restaurants(query, location)
+    try:
+        zom, places = search_zomato_prices(query, location)
+    except Exception as exc:  # price enrichment is best-effort
+        log.info("zomato price lookup skipped: %s", exc)
+        zom, places = [], []
+    by_name = {_norm(z["title"]): z for z in zom}
+    by_name.update({_norm(p["title"]): {**p, "price_basis": "Google price range per person"} for p in places if p.get("price")})
+    merged, used = [], set()
+    for r in maps:
+        key = _norm(r["title"])
+        hit = by_name.get(key) or next((v for k, v in by_name.items() if k and (k in key or key in k)), None)
+        if hit and r.get("price") is None and hit.get("price"):
+            r.update(price=hit["price"], price_text=hit["price_text"], price_basis=hit["price_basis"])
+            if hit.get("delivery"):
+                r["delivery"] = True
+            used.add(_norm(hit["title"]))
+        merged.append(r)
+    names = {_norm(r["title"]) for r in merged}
+    merged += [z for z in zom if _norm(z["title"]) not in names and _norm(z["title"]) not in used]
+    return merged
+
+
 def search_restaurants(query: str, location: str) -> list[dict]:
-    data, ts = _serp({"engine": "google_maps", "type": "search", "q": f"{query} in {location}", "hl": "en", "gl": "in"})
+    data, ts = _serp({"engine": "google_maps", "type": "search", "q": f"{query} restaurants in {location}", "hl": "en", "gl": "in"})
     out = []
-    for r in data.get("local_results", [])[:20]:
+    for r in [x for x in data.get("local_results", []) if _is_food_place(x)][:20]:
         pid = r.get("place_id")
         link = (f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(r.get('title', ''))}&query_place_id={pid}"
                 if pid else r.get("website"))
@@ -170,11 +241,11 @@ def demo_search(category: str, query: str) -> list[dict]:
     return items
 
 
-def search(category: str, query: str, location: str) -> dict:
+def search(category: str, query: str, location: str, delivery: bool = False) -> dict:
     """Returns {'results': [...], 'mode': 'live'|'demo', 'notice': str|None}."""
     if config.SERP_API_KEY:
         try:
-            res = search_restaurants(query, location) if category == "food" else search_products(query, location)
+            res = search_food(query, location, delivery) if category == "food" else search_products(query, location)
             if res:
                 return {"results": res, "mode": "live", "notice": None}
             notice = "Live search returned no results; showing DEMO catalog."

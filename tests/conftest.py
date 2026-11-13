@@ -15,3 +15,16 @@ if os.environ.get("FINLENS_TEST_LIVE") != "1":
     os.environ["GROQ_API_KEY"] = ""
     os.environ["SERP_API"] = ""
     os.environ["SERPAPI_KEY"] = ""
+    os.environ["SARVAM_API_KEY"] = ""
+
+
+def _cleanup_test_stores():
+    # SQLite files can still be open at interpreter exit on Windows; ignore what can't be removed yet
+    import shutil
+    for d in (ROOT / "data").glob("test_stores_*"):
+        shutil.rmtree(d, ignore_errors=True)
+
+
+import atexit  # noqa: E402
+
+atexit.register(_cleanup_test_stores)

@@ -4,6 +4,7 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContaine
 import { inst, inr, kfmt } from "../api.js";
 import { CountUp, Stat } from "../ui.jsx";
 import LiveFeed from "./LiveFeed.jsx";
+import { useLive } from "./LiveContext.jsx";
 
 const RULE_LABEL = { fan_in: "Fan-in", fan_out: "Fan-out", rapid_pass_through: "Rapid pass-through", circular_flow: "Circular flow",
   amount_splitting: "Amount splitting", dormant_activation: "Dormant activation", velocity_spike: "Velocity spike",
@@ -21,6 +22,8 @@ export default function Overview({ dsId, setDsId, me }) {
   const [evalRes, setEvalRes] = useState(null);
   const [tick, setTick] = useState(0);
   const [rings, setRings] = useState([]);
+  const live = useLive();
+  useEffect(() => { if (live?.dsId && live.dsId === dsId) setTick((t) => t + 1); }, [live?.summary]); // eslint-disable-line
   const fileRef = useRef();
   const labRef = useRef();
   const loadList = () => inst.get("/datasets").then((l) => { setList(l); if (!dsId && l.length) setDsId(l[0].id); });
@@ -59,9 +62,10 @@ export default function Overview({ dsId, setDsId, me }) {
         </div>
       </div>
       {err && <div className="error">{err}</div>}
-      <LiveFeed dsId={dsId} setDsId={(id) => { setDsId(id); loadList(); }} onBatch={() => setTick((t) => t + 1)} />
+      <LiveFeed setDsId={(id) => { setDsId(id); loadList(); }} />
 
       {s && (<>
+        {s.model_note && <div className="notice reveal small">🧠 {s.model_note}</div>}
         <div className="grid g4 stagger">
           <Stat color="sky" icon="👥" label="Accounts analysed" value={s.accounts} format={(v) => Math.round(v).toLocaleString("en-IN")} />
           <Stat color="emerald" icon="🔀" label="Transactions" value={s.transactions} format={(v) => Math.round(v).toLocaleString("en-IN")} sub={`${ov.dataset.report.rows_dropped_invalid} invalid, ${ov.dataset.report.rows_dropped_duplicate} duplicate rows dropped`} />
@@ -111,9 +115,11 @@ export default function Overview({ dsId, setDsId, me }) {
             <input ref={labRef} type="file" accept=".csv" hidden onChange={async (e) => { const fd = new FormData(); fd.append("file", e.target.files[0]); setEvalRes(await inst.post(`/datasets/${dsId}/evaluate`, fd)); }} />
             <button className="subtle" onClick={() => labRef.current.click()}>Upload labels CSV</button>
             {(evalRes || s.evaluation) && (() => { const ev = evalRes || s.evaluation; return (
+              <>{ev.stale && <div className="notice small" style={{ marginTop: 8 }}>⚠️ Alerts changed since these labels were evaluated (new transactions or re-analysis). Upload the labels again for current numbers.</div>}
+              {ev.labelled_accounts != null && <div className="small muted" style={{ marginTop: 6 }}>{ev.labelled_accounts} labelled accounts evaluated{ev.unlabelled_accounts ? ` · ${ev.unlabelled_accounts} without labels skipped` : ""}</div>}
               <table style={{ marginTop: 10 }}><thead><tr><th>Alerts counted</th><th className="r">Precision</th><th className="r">Recall</th><th className="r">FPR</th><th className="r">FP</th></tr></thead>
-                <tbody>{["high_only", "medium_or_high", "any_alert"].map((k) => <tr key={k}><td>{k.replaceAll("_", " ")}</td><td className="r num">{ev[k].precision}</td><td className="r num">{ev[k].recall}</td><td className="r num">{ev[k].false_positive_rate}</td><td className="r num">{ev[k].fp}</td></tr>)}</tbody>
-              </table>); })()}
+                <tbody>{["high_only", "medium_or_high", "any_alert"].map((k) => <tr key={k}><td>{k.replaceAll("_", " ")}</td><td className="r num">{ev[k].precision ?? "n/a"}</td><td className="r num">{ev[k].recall ?? "n/a"}</td><td className="r num">{ev[k].false_positive_rate ?? "n/a"}</td><td className="r num">{ev[k].fp}</td></tr>)}</tbody>
+              </table></>); })()}
           </div>
         </div>
       </>)}

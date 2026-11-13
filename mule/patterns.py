@@ -27,7 +27,10 @@ SMURF_MIN_UNIQUE = 10
 SMURF_SMALL_FRACTION = 0.5
 MERCHANT_MIN_DEGREE, MERCHANT_MIN_COUNTERPARTIES, MERCHANT_MIN_ACTIVE_DAYS = 200, 50, 20
 RING_BASE = {"cycle": 90, "shell_chain": 85, "smurfing_fan_in": 70, "smurfing_fan_out": 70, "fan_in_fan_out": 75}
-ACCOUNT_BASE = {"circular_flow": 40, "shell_chain": 35, "smurfing_fan_in": 25, "smurfing_fan_out": 25}
+# MuleGuard's account weights, extended to every rule family so a fan-in / pass-through alert never shows 0/100
+ACCOUNT_BASE = {"circular_flow": 40, "shell_chain": 35, "smurfing_fan_in": 25, "smurfing_fan_out": 25,
+                "rapid_pass_through": 35, "fan_in": 25, "fan_out": 25, "amount_splitting": 25, "dormant_activation": 20,
+                "velocity_spike": 15}
 
 
 def degrees(df: pd.DataFrame) -> dict[str, int]:

@@ -1,0 +1,266 @@
+{
+  "model_version": "lender-xgb-202611131941",
+  "trained_at": "2026-11-13 19:41:06",
+  "data": "Realistic Loan Approval Dataset (US & Canada), Parth Patel / Kaggle, via KaoLEAF splits on Hugging Face \u2014 50,000 synthetic applications mimicking lender rules",
+  "label": "loan_status: 1 = approved, 0 = declined (lender decision, not repayment)",
+  "rows": {
+    "train": 35000,
+    "validation": 5000,
+    "test": 10000
+  },
+  "approval_rate": 0.5505,
+  "trees": 1210,
+  "features": [
+    "credit_score",
+    "credit_history_years",
+    "years_employed",
+    "age",
+    "defaults_on_file",
+    "delinquencies_last_2yrs",
+    "derogatory_marks",
+    "debt_to_income_ratio",
+    "loan_to_income_ratio",
+    "payment_to_income_ratio",
+    "savings_to_income",
+    "occ_Employed",
+    "occ_Self-Employed",
+    "occ_Student",
+    "prod_Credit Card",
+    "prod_Personal Loan",
+    "prod_Line of Credit",
+    "intent_Personal",
+    "intent_Education",
+    "intent_Medical",
+    "intent_Business",
+    "intent_Home Improvement",
+    "intent_Debt Consolidation"
+  ],
+  "monotonic": {
+    "credit_score": 1,
+    "credit_history_years": 1,
+    "years_employed": 1,
+    "defaults_on_file": -1,
+    "delinquencies_last_2yrs": -1,
+    "derogatory_marks": -1,
+    "debt_to_income_ratio": -1,
+    "loan_to_income_ratio": -1,
+    "payment_to_income_ratio": -1,
+    "savings_to_income": 1
+  },
+  "ranges_p0.5_p99.5": {
+    "credit_score": [
+      478.0,
+      810.0
+    ],
+    "credit_history_years": [
+      0.0,
+      28.8
+    ],
+    "years_employed": [
+      0.0,
+      33.9
+    ],
+    "age": [
+      18.0,
+      65.0
+    ],
+    "defaults_on_file": [
+      0.0,
+      1.0
+    ],
+    "delinquencies_last_2yrs": [
+      0.0,
+      4.0
+    ],
+    "derogatory_marks": [
+      0.0,
+      2.0
+    ],
+    "debt_to_income_ratio": [
+      0.019,
+      0.7440049999999974
+    ],
+    "loan_to_income_ratio": [
+      0.025995000000000004,
+      1.953
+    ],
+    "payment_to_income_ratio": [
+      0.008995000000000005,
+      0.651
+    ],
+    "savings_to_income": [
+      0.0,
+      1.3155477299633298
+    ]
+  },
+  "results": {
+    "xgboost_monotonic": {
+      "roc_auc": 0.9822,
+      "pr_auc": 0.9857,
+      "accuracy": 0.9216,
+      "f1": 0.9289,
+      "brier": 0.0533,
+      "calibration": [
+        {
+          "predicted": 0.0,
+          "observed": 0.0
+        },
+        {
+          "predicted": 0.001,
+          "observed": 0.0
+        },
+        {
+          "predicted": 0.017,
+          "observed": 0.016
+        },
+        {
+          "predicted": 0.137,
+          "observed": 0.153
+        },
+        {
+          "predicted": 0.509,
+          "observed": 0.517
+        },
+        {
+          "predicted": 0.85,
+          "observed": 0.847
+        },
+        {
+          "predicted": 0.969,
+          "observed": 0.974
+        },
+        {
+          "predicted": 0.994,
+          "observed": 0.998
+        },
+        {
+          "predicted": 0.999,
+          "observed": 1.0
+        },
+        {
+          "predicted": 1.0,
+          "observed": 1.0
+        }
+      ]
+    },
+    "logistic_regression": {
+      "roc_auc": 0.9425,
+      "pr_auc": 0.9508,
+      "accuracy": 0.8642,
+      "f1": 0.8777,
+      "brier": 0.0953,
+      "calibration": [
+        {
+          "predicted": 0.001,
+          "observed": 0.0
+        },
+        {
+          "predicted": 0.028,
+          "observed": 0.02
+        },
+        {
+          "predicted": 0.117,
+          "observed": 0.104
+        },
+        {
+          "predicted": 0.294,
+          "observed": 0.312
+        },
+        {
+          "predicted": 0.524,
+          "observed": 0.554
+        },
+        {
+          "predicted": 0.727,
+          "observed": 0.721
+        },
+        {
+          "predicted": 0.869,
+          "observed": 0.866
+        },
+        {
+          "predicted": 0.948,
+          "observed": 0.946
+        },
+        {
+          "predicted": 0.984,
+          "observed": 0.987
+        },
+        {
+          "predicted": 0.997,
+          "observed": 0.995
+        }
+      ]
+    },
+    "constant_baseline": {
+      "roc_auc": 0.5,
+      "accuracy": 0.5505
+    },
+    "by_occupation_Employed": {
+      "n": 6978,
+      "roc_auc": 0.9818,
+      "accuracy": 0.9206
+    },
+    "by_occupation_Self-Employed": {
+      "n": 2013,
+      "roc_auc": 0.9812,
+      "accuracy": 0.922
+    },
+    "by_occupation_Student": {
+      "n": 1009,
+      "roc_auc": 0.987,
+      "accuracy": 0.9277
+    }
+  },
+  "feature_importance": [
+    [
+      "defaults_on_file",
+      0.1875
+    ],
+    [
+      "credit_score",
+      0.127
+    ],
+    [
+      "debt_to_income_ratio",
+      0.1053
+    ],
+    [
+      "delinquencies_last_2yrs",
+      0.084
+    ],
+    [
+      "intent_Debt Consolidation",
+      0.0585
+    ],
+    [
+      "prod_Credit Card",
+      0.0537
+    ],
+    [
+      "intent_Personal",
+      0.0517
+    ],
+    [
+      "intent_Education",
+      0.0493
+    ],
+    [
+      "credit_history_years",
+      0.0478
+    ],
+    [
+      "payment_to_income_ratio",
+      0.0457
+    ],
+    [
+      "intent_Business",
+      0.0444
+    ],
+    [
+      "derogatory_marks",
+      0.0364
+    ]
+  ],
+  "train_seconds": 4.5
+}

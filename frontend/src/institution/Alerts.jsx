@@ -25,6 +25,12 @@ export default function Alerts({ dsId }) {
         <button className="subtle" onClick={load}>Search</button>
         {rows && <span className="pill">{rows.length} alerts</span>}
       </div>
+      <div className="prio-legend reveal small">
+        <span><span className="pill high">high</span> model <b>and</b> ≥ 2 patterns agree</span>
+        <span><span className="pill medium">medium</span> only one side: the model alone, <i>or</i> ≥ 2 patterns</span>
+        <span><span className="pill low">low</span> 1 pattern + a moderately high model score</span>
+        <span className="muted">A score of 1.00 with no pattern stays <b>medium</b>: nothing in the transactions confirms it yet.</span>
+      </div>
       {!rows ? <Skeleton /> : (
         <div className="card reveal" style={{ padding: 0 }}>
           <div className="table-wrap">
@@ -33,12 +39,14 @@ export default function Alerts({ dsId }) {
               <tbody>
                 {rows.map((a) => (
                   <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => nav(`/institution/alerts/${a.id}`)}>
-                    <td><span className={`pill ${a.priority}`}>{a.priority}</span></td>
+                    <td><span className={`pill ${a.priority}`}>{a.priority}</span>{a.priority_reason && <div className="small muted" style={{ marginTop: 4, maxWidth: 150 }}>{a.priority_reason}</div>}</td>
                     <td className="num"><b>{a.account}</b></td>
                     <td>{a.rule_families.map((r) => <span key={r} className="pill blue" style={{ marginRight: 4 }}>{RULE_LABEL[r] || r}</span>)}{!a.rule_families.length && <span className="muted small">model only</span>}</td>
-                    <td className="r">
-                      <div className="num"><b>{a.model_score.toFixed(2)}</b></div>
-                      <div className="progress" style={{ height: 5, width: 70, marginLeft: "auto" }}><i style={{ width: `${a.model_score * 100}%`, background: a.model_score > 0.66 ? "#ef476f" : "#ffb020" }} /></div>
+                    <td className="r" title={a.model_reliable ? "" : "Not used: too little data for the model's relative features"}>
+                      {a.model_reliable ? (<>
+                        <div className="num"><b>{a.model_score.toFixed(2)}</b></div>
+                        <div className="progress" style={{ height: 5, width: 70, marginLeft: "auto" }}><i style={{ width: `${a.model_score * 100}%`, background: a.model_score > 0.66 ? "#ef476f" : "#ffb020" }} /></div>
+                      </>) : <span className="small muted">not used<br />(too little data)</span>}
                     </td>
                     <td className="num">{a.linked_alerts.length || ""}</td>
                     <td><span className={`pill ${a.status.startsWith("closed") ? "green" : a.status === "escalated" ? "amber" : ""}`}>{a.status}</span></td>

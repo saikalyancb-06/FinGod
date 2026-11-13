@@ -9,6 +9,7 @@ from functools import lru_cache
 
 import joblib
 import numpy as np
+import pandas as pd
 
 from shared.config import ARTIFACT_DIR
 
@@ -54,10 +55,43 @@ def _model():
     return joblib.load(p) if p.exists() else None
 
 
-def _risk_band(feats: dict) -> dict | None:
+def _risk_band(feats: dict, principal: float = 0.0, months: int = 12) -> dict | None:
     m = _model()
     if not m:
         return None
+    if m.get("feature_set") == "lc_ratios_v1":
+        # model trained on real Lending Club outcomes; map the FinLens statement + loan request to its ratios
+        inc = max(feats["avg_monthly_income"], 1e-9)
+        row = {
+            "emi_ratio": min(feats["proposed_emi_ratio"], 3.0),
+            "obligation_ratio": min(feats["obligation_ratio"], 3.0),
+            "loan_to_income": min(principal / (12 * inc), 10.0),
+            "term_months": float(months),
+        }
+        row["total_debt_ratio"] = row["emi_ratio"] + row["obligation_ratio"]
+        # never extrapolate: clip to the range seen in training and say so
+        outside = []
+        for f, (lo, hi) in (m.get("ranges") or {}).items():
+            if f in row and not (lo <= row[f] <= hi):
+                outside.append(f)
+                row[f] = min(max(row[f], lo), hi)
+        x = pd.DataFrame([row])[m["features"]]
+        p = float(m["model"].predict_proba(x)[0, 1])
+        cut = m.get("bands", {"lower": 0.12, "moderate": 0.2})
+        band = "lower" if p < cut["lower"] else "moderate" if p < cut["moderate"] else "higher"
+        observed = None
+        try:
+            import json
+            observed = json.loads((ARTIFACT_DIR / "credit_metrics.json").read_text())["results"]["observed_default_rate_by_band_2015"].get(band)
+        except Exception:
+            pass
+        return {"modelled_probability": round(p, 3), "band": band, "model_version": m["version"],
+                "observed_default_rate_in_band": observed,
+                "inputs": {k: round(v, 3) for k, v in row.items() if k in m["features"]},
+                "outside_training_range": [f for f in outside if f in m["features"]],
+                "label_meaning": "Estimated probability that a loan with these affordability ratios was charged off, learned from "
+                                 "~1M real Lending Club loans (US, 2007-2015).",
+                "caveat": "Supporting signal only: US peer-to-peer loans differ from your situation; this is not a credit decision."}
     x = np.array([[feats[k] for k in CREDIT_FEATURES]])
     p = float(m["model"].predict_proba(x)[0, 1])
     band = "lower" if p < 0.05 else "moderate" if p < 0.15 else "higher"
@@ -170,8 +204,9 @@ def assess(df, principal: float, annual_rate_pct: float, months: int, declared_o
             f"Income variability across months is {f['income_cv']*100:.0f}% ({'stable' if f['income_cv'] < 0.15 else 'variable'}).")
         (supports if f["savings_rate"] > 0.1 else limits).append(f"Average monthly surplus is {f['savings_rate']*100:.0f}% of income.")
         (supports if f["obligation_ratio"] < 0.2 else limits).append(f"Existing obligations take {f['obligation_ratio']*100:.0f}% of income.")
-        (supports if f["cashflow_trend"] >= 0 else limits).append(
-            f"Net cash flow is {'improving' if f['cashflow_trend'] >= 0 else 'deteriorating'} over the period analysed.")
+        tr = f["cashflow_trend"]
+        (supports if tr >= 0 else limits).append(
+            f"Net cash flow is {'improving' if tr > 0.01 else 'deteriorating' if tr < -0.01 else 'steady'} over the period analysed.")
         (supports if e <= affordable_emi else limits).append(
             f"Requested EMI ₹{e:,.0f} vs estimated affordable EMI ₹{affordable_emi:,.0f}.")
 
@@ -211,6 +246,6 @@ def assess(df, principal: float, annual_rate_pct: float, months: int, declared_o
         "illustrative_options": suggestions,
         "stress_tests": stress,
         "supporting_factors": supports, "limiting_factors": limits, "missing_information": missing,
-        "model_signal": _risk_band(f) if not missing else None,
+        "model_signal": _risk_band(f, principal, months) if not missing else None,
         "disclaimer": "Estimate for decision support only. It is not a loan approval; lender underwriting and regulatory checks remain separate. No fraud or AML data is used.",
     }

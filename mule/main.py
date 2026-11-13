@@ -6,6 +6,7 @@ The system never freezes accounts or labels anyone a criminal; humans decide.
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import time
@@ -13,7 +14,7 @@ from datetime import datetime
 
 import networkx as nx
 import pandas as pd
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -23,6 +24,7 @@ from shared import config, llm
 from shared.audit import setup_logging
 from shared.security import hash_password, make_token, read_token, verify_password
 
+from . import live
 from .db import Account, Alert, AuditLog, CaseNote, Dataset, Investigator, SessionLocal, Transaction, cipher, init_db
 from .detection import analyze, load_model
 from .features import SchemaError, normalize_transactions
@@ -142,9 +144,11 @@ def _persist_analysis(db, ds: Dataset, df_real: pd.DataFrame, alias: dict[str, s
         "rule_hits": pd.Series([f for a in al_ for f in a["rule_families"]]).value_counts().to_dict() if al_ else {},
         "fraud_rings": len(out["rings"]), "suppressed_merchant_alerts": out["suppressed_merchant_alerts"],
         "processing_time_seconds": round(time.perf_counter() - t0, 3),
+        "model_applicable": out["model_applicable"], "model_note": out["model_note"],
     }
     if prev_eval:
-        ds.summary["evaluation"] = prev_eval
+        changed = prev_eval.get("alerts_at_evaluation") != len(al_)
+        ds.summary["evaluation"] = {**prev_eval, "stale": bool(changed or prev_eval.get("stale"))}
     return df_alias
 
 
@@ -195,18 +199,46 @@ class AppendIn(BaseModel):
     rows: list[str] = Field(min_length=1, max_length=5000)  # CSV lines: transaction_id,sender_id,receiver_id,amount,timestamp
 
 
-@app.post("/api/datasets/{ds_id}/append")
-def append_rows(ds_id: int, body: AppendIn, who: Who = Depends(current)):
-    header = "transaction_id,sender_id,receiver_id,amount,timestamp"
-    lines = [r.strip() for r in body.rows if r.strip() and not r.strip().lower().startswith("transaction_id")]
-    if not lines:
-        raise HTTPException(422, "No rows")
-    try:
-        new, rep = normalize_transactions((header + "\n" + "\n".join(lines)).encode())
-    except Exception as exc:
-        raise HTTPException(422, f"Bad rows: {exc}")
+def reanalyse(ds_id: int) -> dict:
+    """Re-run detection on a stored dataset (e.g. after a detection change). Analyst work is kept."""
     with SessionLocal() as db:
         ds = db.get(Dataset, ds_id) or _404("Dataset")
+        accts = db.scalars(select(Account).where(Account.dataset_id == ds_id)).all()
+        alias = {cipher.decrypt(a.real_enc).decode(): a.alias for a in accts}
+        rev = {v: k for k, v in alias.items()}
+        rows = db.execute(select(Transaction.txn_id, Transaction.ts, Transaction.src, Transaction.dst, Transaction.amount, Transaction.channel)
+                          .where(Transaction.dataset_id == ds_id)).all()
+        if len(rows) < 3:
+            return {"dataset_id": ds_id, "skipped": True}
+        df = pd.DataFrame(rows, columns=["txn_id", "timestamp", "src", "dst", "amount", "channel"])
+        df["src"], df["dst"] = df["src"].map(rev), df["dst"].map(rev)
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.dropna(subset=["src", "dst"]).sort_values("timestamp").reset_index(drop=True)
+        _persist_analysis(db, ds, df, alias)
+        db.commit()
+        return {"dataset_id": ds_id, "alerts": ds.summary.get("alerts"), "model_applicable": ds.summary.get("model_applicable")}
+
+
+@app.post("/api/datasets/{ds_id}/reanalyse")
+def reanalyse_endpoint(ds_id: int, who: Who = Depends(current)):
+    with SessionLocal() as db:
+        audit(db, who, "reanalyse", f"dataset:{ds_id}")
+        db.commit()
+    return reanalyse(ds_id)
+
+
+def append_lines(ds_id: int, lines: list[str], actor: str) -> dict:
+    """Append CSV rows (transaction_id,sender_id,receiver_id,amount,timestamp) to a dataset, re-analyse it,
+    and report which alerts are new or escalated. Shared by the REST endpoint and the live simulator."""
+    header = "transaction_id,sender_id,receiver_id,amount,timestamp"
+    lines = [r.strip() for r in lines if r and r.strip() and not r.strip().lower().startswith("transaction_id")]
+    if not lines:
+        raise ValueError("No rows")
+    new, rep = normalize_transactions((header + "\n" + "\n".join(lines)).encode())
+    order = {"low": 1, "medium": 2, "high": 3}
+    with SessionLocal() as db:
+        ds = db.get(Dataset, ds_id) or _404("Dataset")
+        before = {a.account: a.priority for a in db.scalars(select(Alert).where(Alert.dataset_id == ds_id))}
         accts = db.scalars(select(Account).where(Account.dataset_id == ds_id)).all()
         alias = {cipher.decrypt(a.real_enc).decode(): a.alias for a in accts}
         alias.update(ds.report.get("pending_alias", {}))
@@ -236,9 +268,28 @@ def append_rows(ds_id: int, body: AppendIn, who: Who = Depends(current)):
         else:
             rpt.pop("pending_alias", None)
         ds.report = rpt
-        audit(db, who, "live_append", f"dataset:{ds_id}", rows=int(len(new)))
+        db.add(AuditLog(actor=actor, action="live_append", target=f"dataset:{ds_id}", detail={"rows": int(len(new))}))
         db.commit()
-        return {"added": int(len(new)), "summary": ds.summary}
+        fresh = []
+        for a in db.scalars(select(Alert).where(Alert.dataset_id == ds_id)):
+            if a.account not in before or order.get(a.priority, 0) > order.get(before[a.account], 0):
+                fresh.append({"id": a.id, "account": a.account, "priority": a.priority, "model_score": round(a.model_score, 3),
+                              "rule_families": a.rule_families, "headline": (a.explanation or [""])[0],
+                              "escalated": a.account in before})
+        fresh.sort(key=lambda x: -order.get(x["priority"], 0))
+        rows_out = [{"txn_id": r.txn_id, "ts": str(r.timestamp), "src": alias[r.src], "dst": alias[r.dst], "amount": round(float(r.amount), 2)}
+                    for r in new.tail(12).itertuples(index=False)]
+        return {"added": int(len(new)), "summary": ds.summary, "new_alerts": fresh, "rows": rows_out}
+
+
+@app.post("/api/datasets/{ds_id}/append")
+def append_rows(ds_id: int, body: AppendIn, who: Who = Depends(current)):
+    try:
+        out = append_lines(ds_id, body.rows, who.username)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    live.hub.broadcast(ds_id, {"type": "batch", **out})
+    return out
 
 
 @app.get("/api/datasets/{ds_id}/rings")
@@ -261,8 +312,10 @@ def export_json(ds_id: int, who: Who = Depends(current)):
     order = {"high": 0, "medium": 1, "low": 2}
     sus = sorted(al, key=lambda a: (order.get(a.priority, 3), -a.model_score))
     return {
-        "suspicious_accounts": [{"account_id": a.account, "suspicion_score": round(max(a.pattern_score or 0, a.model_score * 100), 1),
-                                 "pattern_score": a.pattern_score, "model_score": a.model_score, "priority": a.priority,
+        "suspicious_accounts": [{"account_id": a.account,
+                                 "suspicion_score": round(max(a.pattern_score or 0, a.model_score * 100 if a.model_reliable is not False else 0), 1),
+                                 "pattern_score": a.pattern_score, "model_score": a.model_score if a.model_reliable is not False else None,
+                                 "model_used": a.model_reliable is not False, "priority": a.priority, "priority_reason": a.priority_reason,
                                  "detected_patterns": a.rule_families, "ring_id": (a.ring_ids or [None])[0], "review_status": a.status} for a in sus],
         "fraud_rings": [{"ring_id": r["ring_id"], "member_accounts": r["member_accounts"], "pattern_type": r["pattern_type"], "risk_score": r["risk_score"]}
                         for r in (ds.rings or [])],
@@ -339,6 +392,7 @@ def _alert_dict(a: Alert) -> dict:
     return {"id": a.id, "dataset_id": a.dataset_id, "account": a.account, "priority": a.priority, "model_score": a.model_score,
             "rule_families": a.rule_families, "explanation": a.explanation, "linked_alerts": a.linked_alerts, "status": a.status,
             "ring_ids": a.ring_ids or [], "pattern_score": a.pattern_score,
+            "priority_reason": a.priority_reason, "model_reliable": a.model_reliable if a.model_reliable is not None else True,
             "status_meaning": STATUSES.get(a.status), "assigned_to": a.assigned_to, "reviewed_by": a.reviewed_by,
             "created_at": a.created_at, "updated_at": a.updated_at}
 
@@ -381,7 +435,10 @@ def account_detail(ds_id: int, alias: str, who: Who = Depends(current)):
 
     tl = [{"txn_id": t.txn_id, "ts": t.ts, "direction": "in" if t.dst == alias else "out",
            "counterparty": t.src if t.dst == alias else t.dst, "amount": t.amount, "channel": t.channel} for t in txs]
+    with SessionLocal() as db:
+        applicable = (db.get(Dataset, ds_id).summary or {}).get("model_applicable", True)
     return {"account": alias, "features": acct.features, "evidence": acct.evidence, "model_score": acct.model_score,
+            "model_applicable": applicable,
             "alert": _alert_dict(alert) if alert else None, "timeline": tl,
             "senders": cp(incoming, "src"), "receivers": cp(outgoing, "dst"),
             "totals": {"in": round(sum(t.amount for t in incoming), 2), "out": round(sum(t.amount for t in outgoing), 2)}}
@@ -525,8 +582,12 @@ def reveal(ds_id: int, alias: str, body: NoteIn, who: Who = Depends(current)):
 @app.post("/api/alerts/{alert_id}/summary")
 def ai_summary(alert_id: int, who: Who = Depends(current)):
     d = alert_detail(alert_id, who)
-    facts = {"account": d["account"], "priority": d["priority"], "model_score": d["model_score"], "threshold": d["threshold"],
+    facts = {"account": d["account"], "priority": d["priority"], "priority_reason": d.get("priority_reason"),
              "rules": d["evidence"].get("rules", {}), "explanation": d["explanation"], "linked_alerts": d["linked_alerts"][:10]}
+    if d.get("model_reliable") is not False:
+        facts.update(model_score=round(d["model_score"], 3), threshold=round(d["threshold"], 3))
+    else:
+        facts["model_used"] = "No - the dataset is too small for the ML model; the alert comes from rules only."
     fallback = " ".join(d["explanation"]) + " These indicators warrant human review; they do not establish wrongdoing."
     if not llm.available():
         return {"summary": fallback, "llm_used": False}
@@ -551,7 +612,9 @@ def report(alert_id: int, who: Who = Depends(current)):
     lines = [f"# Investigation report - Alert #{d['id']} ({d['account']})", "",
              f"Generated {datetime.utcnow():%Y-%m-%d %H:%M} UTC by {who.username} ({who.role}).", "",
              "> This report documents indicators for human review. It is not a finding of criminal activity.", "",
-             "## Alert", f"- Priority: **{d['priority']}**", f"- Model score: {d['model_score']:.3f} (threshold {d['threshold']})",
+             "## Alert", f"- Priority: **{d['priority']}**" + (f" ({d['priority_reason']})" if d.get("priority_reason") else ""),
+             (f"- Model score: {d['model_score']:.2f} (threshold {d['threshold']:.2f})" if d.get("model_reliable") is not False
+              else "- Model score: not used (dataset too small for the model; rules only)"),
              f"- Rule families: {', '.join(d['rule_families']) or 'none'}", f"- Status: **{d['status']}** - {d['status_meaning']}",
              f"- Assigned to: {d['assigned_to'] or '-'} · Final review by: {d['reviewed_by'] or '-'}",
              f"- Linked alerted accounts (≤2 hops): {', '.join(d['linked_alerts']) or 'none'}", "", "## Evidence"]
@@ -568,8 +631,11 @@ def report(alert_id: int, who: Who = Depends(current)):
 # ---------------- evaluation against known labels (synthetic tests) ----------------
 def _store_eval(db, ds: Dataset, labels: dict[str, int]):
     alerts_ = {a.account: a for a in db.scalars(select(Alert).where(Alert.dataset_id == ds.id))}
-    accts = [a.alias for a in db.scalars(select(Account).where(Account.dataset_id == ds.id))]
-    res = {}
+    all_accts = [a.alias for a in db.scalars(select(Account).where(Account.dataset_id == ds.id))]
+    accts = [a for a in all_accts if a in labels]
+    if not accts:
+        raise HTTPException(400, "None of the account ids in the labels file match this dataset")
+    res = {"labelled_accounts": len(accts), "unlabelled_accounts": len(all_accts) - len(accts)}
     for name, pred in {"any_alert": lambda a: a in alerts_,
                        "medium_or_high": lambda a: a in alerts_ and alerts_[a].priority in ("high", "medium"),
                        "high_only": lambda a: a in alerts_ and alerts_[a].priority == "high"}.items():
@@ -577,15 +643,16 @@ def _store_eval(db, ds: Dataset, labels: dict[str, int]):
         fp = sum(1 for a in accts if pred(a) and labels.get(a, 0) == 0)
         fn = sum(1 for a in accts if not pred(a) and labels.get(a) == 1)
         tn = len(accts) - tp - fp - fn
-        res[name] = {"precision": round(tp / (tp + fp), 3) if tp + fp else 0, "recall": round(tp / (tp + fn), 3) if tp + fn else 0,
-                     "false_positive_rate": round(fp / (fp + tn), 4) if fp + tn else 0, "tp": tp, "fp": fp, "fn": fn, "tn": tn}
+        res[name] = {"precision": round(tp / (tp + fp), 3) if tp + fp else None, "recall": round(tp / (tp + fn), 3) if tp + fn else None,
+                     "false_positive_rate": round(fp / (fp + tn), 4) if fp + tn else None, "tp": tp, "fp": fp, "fn": fn, "tn": tn}
     from sklearn.metrics import average_precision_score
     sc = {a.alias: a.model_score for a in db.scalars(select(Account).where(Account.dataset_id == ds.id))}
     y = [labels.get(a, 0) for a in accts]
     if 0 < sum(y) < len(y):
         res["model_pr_auc"] = round(float(average_precision_score(y, [sc[a] for a in accts])), 4)
     s = dict(ds.summary)
-    s["evaluation"] = {**res, "note": "Measured against labels supplied with this (synthetic) dataset."}
+    s["evaluation"] = {**res, "alerts_at_evaluation": len(alerts_),
+                       "note": "Measured against labels supplied with this (synthetic) dataset, on labelled accounts only."}
     ds.summary = s
     db.commit()
     return s["evaluation"]
@@ -627,3 +694,130 @@ def meta():
 @app.get("/api/sample-dataset", response_class=PlainTextResponse)
 def sample():
     return (config.ROOT / "data" / "samples" / "mule_demo_transactions.csv").read_text()
+
+
+# ---------------- live streaming (built-in simulator + WebSocket push) ----------------
+class LiveStartIn(BaseModel):
+    name: str = Field(default="", max_length=120)
+    speed: float = Field(default=1.0, ge=0.25, le=4.0)
+    auto_patterns: bool = True
+
+
+def _sim_append(ds_id: int, rows: list[str]) -> dict:
+    return append_lines(ds_id, rows, "live-simulator")
+
+
+@app.post("/api/live/start")
+def live_start(body: LiveStartIn, who: Who = Depends(current)):
+    with SessionLocal() as db:
+        ds = Dataset(name=body.name or f"Live stream {datetime.now():%d %b %H:%M}", uploaded_by=who.username, encrypted_file=cipher.encrypt(b""),
+                     live=True, status="live", report={"rows_in": 0, "rows_out": 0, "rows_dropped_invalid": 0, "rows_dropped_duplicate": 0,
+                                                       "source": "built-in simulator"},
+                     summary={"accounts": 0, "transactions": 0, "alerts": 0}, rings=[])
+        db.add(ds)
+        audit(db, who, "live_start", "dataset:new", speed=body.speed)
+        db.commit()
+        ds_id = ds.id
+    sim = live.Simulator(ds_id, _sim_append, speed=body.speed, auto_patterns=body.auto_patterns)
+    live.sims[ds_id] = sim
+    sim.start()
+    return {"dataset_id": ds_id, "status": "running", "patterns": live.PATTERNS}
+
+
+def _sim(ds_id: int) -> "live.Simulator":
+    sim = live.sims.get(ds_id)
+    if not sim:
+        raise HTTPException(404, "No simulator running for this dataset")
+    return sim
+
+
+@app.post("/api/live/{ds_id}/stop")
+def live_stop(ds_id: int, who: Who = Depends(current)):
+    _sim(ds_id).stop()
+    return {"stopped": True}
+
+
+class InjectIn(BaseModel):
+    pattern: str
+
+
+@app.post("/api/live/{ds_id}/inject")
+def live_inject(ds_id: int, body: InjectIn, who: Who = Depends(current)):
+    if body.pattern not in live.PATTERNS:
+        raise HTTPException(400, f"pattern must be one of {list(live.PATTERNS)}")
+    sim = _sim(ds_id)
+    if sim.status != "running":
+        raise HTTPException(409, "Simulator is not running")
+    with SessionLocal() as db:
+        audit(db, who, "live_inject", f"dataset:{ds_id}", pattern=body.pattern)
+        db.commit()
+    return sim.inject(body.pattern)
+
+
+class ManualTxIn(BaseModel):
+    sender: str = Field(min_length=2, max_length=40)
+    receiver: str = Field(min_length=2, max_length=40)
+    amount: float = Field(gt=0, le=100_000_000)
+
+
+@app.post("/api/live/{ds_id}/tx")
+def live_manual_tx(ds_id: int, body: ManualTxIn, who: Who = Depends(current)):
+    """mr-mule style: an investigator types a transaction; it is analysed immediately."""
+    if body.sender == body.receiver:
+        raise HTTPException(422, "Sender and receiver must differ")
+    sim = live.sims.get(ds_id)
+    ts = sim.clock if sim else datetime.now()
+    row = f"MANUAL{ds_id}_{int(time.time() * 1000)},{body.sender},{body.receiver},{body.amount:.2f},{ts:%Y-%m-%d %H:%M:%S}"
+    out = append_lines(ds_id, [row], who.username)
+    live.hub.broadcast(ds_id, {"type": "batch", **out})
+    for a in out.get("new_alerts", []):
+        live.hub.broadcast(ds_id, {"type": "alert", "dataset_id": ds_id, **a})
+    return out
+
+
+@app.get("/api/live/{ds_id}/status")
+def live_status(ds_id: int, who: Who = Depends(current)):
+    sim = live.sims.get(ds_id)
+    return {"running": bool(sim and sim.status == "running"), "status": sim.status if sim else "none",
+            "sent": sim.sent if sim else 0, "injected": sim.injected if sim else [], "patterns": live.PATTERNS,
+            "sim_clock": str(sim.clock) if sim else None, "recent": list(live.hub.recent.get(ds_id, []))[-10:]}
+
+
+@app.websocket("/ws/live/{ds_id}")
+async def live_ws(websocket: WebSocket, ds_id: int, token: str = ""):
+    body = read_token(token, config.MULE_SECRET)
+    if not body or body.get("aud") != "institution":
+        await websocket.close(code=4401)
+        return
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    live.hub.add(ds_id, websocket, loop)
+    sim = live.sims.get(ds_id)
+    await websocket.send_json({"type": "hello", "dataset_id": ds_id, "running": bool(sim and sim.status == "running"),
+                               "patterns": live.PATTERNS})
+    try:
+        while True:
+            await websocket.receive_text()  # keep-alive pings from the client
+    except WebSocketDisconnect:
+        pass
+    finally:
+        live.hub.remove(ds_id, websocket)
+
+
+@app.get("/api/datasets/{ds_id}/trail")
+def money_trail(ds_id: int, account: str, hops: int = Query(default=2, ge=1, le=3), limit: int = Query(default=250, le=1000),
+                who: Who = Depends(current)):
+    """Time-ordered transactions inside an account's ego network, for the money-trail replay."""
+    g = graph(ds_id, account=account, hops=hops, limit=90, who=who)
+    ids = {n["id"] for n in g["nodes"]}
+    with SessionLocal() as db:
+        rows = db.execute(select(Transaction.ts, Transaction.src, Transaction.dst, Transaction.amount)
+                          .where(Transaction.dataset_id == ds_id, Transaction.src.in_(ids), Transaction.dst.in_(ids))
+                          .order_by(Transaction.ts)).all()
+    # keep the transactions closest in time to the focus account's own activity
+    own = [r for r in rows if account in (r[1], r[2])]
+    if own and len(rows) > limit:
+        t0, t1 = own[0][0], own[-1][0]
+        rows = sorted(rows, key=lambda r: 0 if t0 <= r[0] <= t1 else min(abs((r[0] - t0).total_seconds()), abs((r[0] - t1).total_seconds())))[:limit]
+        rows.sort(key=lambda r: r[0])
+    return [{"ts": str(t), "source": s, "target": d, "amount": round(a, 2)} for t, s, d, a in rows[:limit]]

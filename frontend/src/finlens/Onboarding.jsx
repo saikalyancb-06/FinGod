@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fin } from "../api.js";
+import ProfileWizard from "./ProfileWizard.jsx";
 
 export function UploadCard({ onUploaded }) {
   const [busy, setBusy] = useState(false);
@@ -52,14 +53,19 @@ export default function Onboarding({ me, onReady }) {
   const nav = useNavigate();
   const [consents, setConsents] = useState(me.consents);
   const toggle = async (purpose, granted) => setConsents(await fin.post("/consents", { purpose, granted }));
+  const profileDone = me.profile?.completed;
   return (
-    <div className="stack" style={{ maxWidth: 780 }}>
+    <div className="stack" style={{ maxWidth: 820 }}>
       <div className="card hero reveal">
         <h1 style={{ color: "#fff" }}>Hi {me.name.split(" ")[0]}! 👋</h1>
-        <p style={{ margin: 0, fontSize: 15 }}>Two quick steps and FinLens will show you where your money goes and how to make it go further.</p>
+        <p style={{ margin: 0, fontSize: 15 }}>
+          {profileDone ? "Nearly there: choose what FinLens may use, then add a statement." :
+            "Tell FinLens a little about yourself (2 minutes). Every budget, suggestion and answer will be tailored to you."}
+        </p>
       </div>
-      <div className="card stack reveal">
-        <h3><span className="chip-ico" style={{ background: "var(--mint-bg)" }}>1</span>Choose what FinLens may do with your data</h3>
+      {!profileDone && <ProfileWizard onDone={onReady} />}
+      {profileDone && <div className="card stack reveal">
+        <h3><span className="chip-ico" style={{ background: "var(--mint-bg)" }}>2</span>Choose what FinLens may do with your data</h3>
         {Object.entries(me.purposes).map(([p, text]) => (
           <label key={p} className="check">
             <input type="checkbox" checked={!!consents[p]} onChange={(e) => toggle(p, e.target.checked)} />
@@ -69,12 +75,12 @@ export default function Onboarding({ me, onReady }) {
           </label>
         ))}
         <p className="muted small">Each purpose is separate and can be revoked anytime in Settings.</p>
-      </div>
-      {consents.analytics ? (
+      </div>}
+      {profileDone && (consents.analytics ? (
         <UploadCard onUploaded={async (r) => { if (r.transactions_added || r.rows_out) { await onReady(); nav("/finlens"); } }} />
       ) : (
-        <div className="notice">Turn on “Spending analytics” to upload a statement.</div>
-      )}
+        <div className="notice">Turn on “Spending analytics” to upload a statement. You can already use Smart Spending: it plans around the profile you just gave.</div>
+      ))}
     </div>
   );
 }

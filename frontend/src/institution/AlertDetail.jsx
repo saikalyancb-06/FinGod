@@ -66,7 +66,10 @@ export default function AlertDetail({ me }) {
           </div>
           <div style={{ textAlign: "right" }}>
             <div className="small" style={{ opacity: .85 }}>ML score / threshold</div>
-            <div className="num" style={{ fontSize: 34, fontWeight: 700 }}>{a.model_score.toFixed(2)} <span style={{ fontSize: 16, opacity: .8 }}>/ {a.threshold?.toFixed(2)}</span></div>
+            {a.model_reliable === false
+              ? <div className="small" style={{ maxWidth: 220, margin: "6px 0" }}>Not used: too little data for the model. This alert comes from the rules only.</div>
+              : <div className="num" style={{ fontSize: 34, fontWeight: 700 }}>{a.model_score.toFixed(2)} <span style={{ fontSize: 16, opacity: .8 }}>/ {a.threshold?.toFixed(2)}</span></div>}
+            {a.priority_reason && <div className="small" style={{ opacity: .9, marginBottom: 6 }}>Why {a.priority}: {a.priority_reason}</div>}
             <div className="pill" style={{ background: "#fff", color: "var(--ink)" }}>{STATUS_FLOW[a.status]} {a.status}</div>
           </div>
         </div>
@@ -109,7 +112,7 @@ export default function AlertDetail({ me }) {
 
       <div className="card reveal">
         <div className="row between"><h3>🕸️ Connected accounts (2 hops)</h3><GraphLegend /></div>
-        {g ? <Graph data={g} height={460} onSelect={(n) => !n.focus && nav(`/institution/accounts/${a.dataset_id}/${n.id}`)} /> : <div className="skeleton" style={{ height: 460 }} />}
+        {g ? <Graph data={g} height={460} loadTrail={() => inst.get(`/datasets/${a.dataset_id}/trail?account=${a.account}`)} onSelect={(n) => !n.focus && nav(`/institution/accounts/${a.dataset_id}/${n.id}`)} /> : <div className="skeleton" style={{ height: 460 }} />}
         <p className="small muted">Hover to highlight flows. Click a node to open that account.</p>
       </div>
 

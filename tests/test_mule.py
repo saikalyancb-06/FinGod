@@ -168,3 +168,65 @@ def test_live_append_mr_mule_schema(analyst):
     assert r["added"] == 3 and r["summary"]["fraud_rings"] >= 1
     # re-sending the same rows is idempotent
     assert analyst.post(f"/api/datasets/{ds}/append", json={"rows": more}).json()["added"] == 0
+
+
+def test_deployed_model_is_ibm_trained_and_separates_demo_mules():
+    from mule.detection import analyze, load_model
+    m = load_model()
+    assert m["feature_set"] == "model_features_v1" and "ibm" in m["version"]
+    df, _ = normalize_transactions(DEMO)
+    out = analyze(df)
+    lab = pd.read_csv(ROOT / "data" / "samples" / "mule_demo_labels_for_evaluation.csv").set_index("account")["is_mule"]
+    s = pd.Series(out["scores"])
+    assert s[s.index.map(lab) == 1].mean() > 3 * s[s.index.map(lab) == 0].mean()
+
+
+def test_live_simulator_streams_and_alerts_over_websocket(analyst):
+    import time as _t
+    from mule import live
+    r = analyst.post("/api/live/start", json={"speed": 4, "auto_patterns": False}).json()
+    ds = r["dataset_id"]
+    tok = analyst.headers["Authorization"].split()[1]
+    with analyst.websocket_connect(f"/ws/live/{ds}?token={tok}") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        for p in ("fan_in_out", "pass_through"):
+            assert analyst.post(f"/api/live/{ds}/inject", json={"pattern": p}).json()["pattern"] == p
+        types, alerts = set(), []
+        deadline = _t.time() + 40
+        while _t.time() < deadline and not alerts:
+            m = ws.receive_json()
+            types.add(m["type"])
+            if m["type"] == "alert":
+                alerts.append(m)
+        assert "batch" in types and alerts, types
+        assert alerts[0]["account"].startswith("ACC-") and alerts[0]["priority"] in {"low", "medium", "high"}
+    st = analyst.get(f"/api/live/{ds}/status").json()
+    assert st["running"] and st["sent"] > 0 and len(st["injected"]) == 2
+    out = analyst.post(f"/api/live/{ds}/tx", json={"sender": "AC1111111", "receiver": "AC2222222", "amount": 5000}).json()
+    assert out["added"] == 1
+    analyst.post(f"/api/live/{ds}/stop")
+    acct = alerts[0]["account"]
+    trail = analyst.get(f"/api/datasets/{ds}/trail", params={"account": acct}).json()
+    assert trail and trail == sorted(trail, key=lambda x: x["ts"])
+
+
+def test_model_is_not_trusted_on_tiny_datasets():
+    """A handful of manual / mr-mule payments must not produce 'model only' alerts with score ~1.0:
+    the model's features are relative to the dataset and meaningless with ~6 rows."""
+    from mule.detection import analyze
+    t0 = pd.Timestamp("2026-11-13 22:00")
+    rows = [("T1", "A", "B", 5000, 0), ("T2", "B", "C", 4900, 2), ("T3", "C", "D", 4800, 4), ("T4", "D", "E", 4700, 6),
+            ("T5", "E", "A", 4600, 8), ("T6", "A", "C", 3000, 10)]
+    df = pd.DataFrame([(i, s, d, a, t0 + pd.Timedelta(minutes=m)) for i, s, d, a, m in rows],
+                      columns=["txn_id", "src", "dst", "amount", "timestamp"])
+    df["channel"] = "UPI"
+    out = analyze(df)
+    assert out["model_applicable"] is False and out["model_note"]
+    assert not [a for a in out["alerts"] if not a["rule_families"]]  # nothing raised by the model alone
+    # a real pattern on tiny data is still caught by the rules
+    rows = [(f"F{i}", f"S{i}", "M", 9000, i * 3) for i in range(10)] + [("O1", "M", "X1", 40000, 40), ("O2", "M", "X2", 40000, 45)]
+    df = pd.DataFrame([(i, s, d, a, t0 + pd.Timedelta(minutes=m)) for i, s, d, a, m in rows],
+                      columns=["txn_id", "src", "dst", "amount", "timestamp"])
+    df["channel"] = "UPI"
+    m = next(a for a in analyze(df)["alerts"] if a["account"] == "M")
+    assert m["priority"] == "medium" and not m["model_reliable"] and "rules only" in m["priority_reason"]

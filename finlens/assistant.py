@@ -16,6 +16,15 @@ from . import analytics as A
 
 SYSTEM = (
     "You are FinLens, a friendly personal-finance assistant for students and young professionals in India. "
+    "If FACTS has 'about_you' (the user's own profile: occupation, living situation, declared income, goals, diet), tailor the "
+    "advice to it - e.g. pocket money vs salary, hostel vs family, their stated goal and priorities - and mention when the "
+    "statement disagrees with what they declared. If FACTS has 'goals_progress', treat those goals as commitments with deadlines: "
+    "say whether they are on track or behind, and frame every spending suggestion around keeping them on schedule. "
+    "FACTS.money_health is the computed verdict on the user's overall position. Never say or imply the user is running out of "
+    "money, broke, overspending or in trouble unless money_health.status is 'tight' or 'at_risk'. If they ask why they are running "
+    "out of money but the status is 'healthy' or 'steady', say clearly that the data shows they are NOT running out, cite "
+    "money_health.strengths, then show where most of the money goes and how to put the surplus to work for their goals. "
+    "Match the tone to the status: encouraging when healthy, calm when steady, practical when tight or at_risk. "
     "Answer the user's question using ONLY the numbers in FACTS (JSON), quoted exactly. Never do arithmetic: do not add, subtract, "
     "estimate, project or recompute any figure, and do not promise savings amounts. If something is not in FACTS, say you don't have "
     "that data. Never write approximate amounts (no ≈, ~, 'about ₹', 'roughly ₹'). Use ₹ and Indian number formatting. "
@@ -27,10 +36,11 @@ SYSTEM = (
 
 INTENTS = [
     ("afford", [r"afford", r"can i buy", r"should i buy", r"enough (money|balance) (for|to)"]),
-    ("running_out", [r"running out", r"run out", r"broke", r"short of money", r"why.*(no|less) money", r"month.?end"]),
+    ("health", [r"how am i doing", r"how.*(my )?financ", r"am i (doing )?(ok|okay|fine|good|well)", r"financial health", r"money health"]),
+    ("forecast", [r"forecast", r"predict", r"month.?end balance", r"end of (the )?month", r"projected", r"will i have"]),
+    ("running_out", [r"running out", r"run out", r"broke", r"short of money", r"why.*(no|less) money"]),
     ("why_change", [r"why.*(increase|more|higher|up|spike|change|went up)", r"what changed", r"spend(ing)? (more|increase)"]),
     ("recurring", [r"subscription", r"recurring", r"bills?", r"auto.?debit", r"membership"]),
-    ("forecast", [r"forecast", r"predict", r"end of (the )?month", r"projected", r"will i have"]),
     ("safe_to_spend", [r"safe to spend", r"how much can i spend", r"spend this (week|month)"]),
     ("goals", [r"goal", r"save for", r"saving for", r"how long.*save"]),
     ("category_spend", [r"how much.*(spend|spent)", r"spent on", r"spend on", r"spending on"]),
@@ -59,10 +69,9 @@ def classify(q: str) -> str:
 
 
 def _price(q: str) -> float | None:
-    m = re.search(r"(?:₹|rs\.?|inr)\s*(\d[\d,]*)|(\d[\d,]{2,})\s*(?:rs|rupees|₹)?", q.lower())
-    if not m:
-        return None
-    return float((m.group(1) or m.group(2)).replace(",", ""))
+    from .amounts import price
+    v = price(q)
+    return v if v and v >= 50 else None  # tiny/unclear -> ask for the price instead of guessing
 
 
 def gather(question: str, df, ctx: dict) -> tuple[str, dict]:
@@ -115,7 +124,17 @@ def gather(question: str, df, ctx: dict) -> tuple[str, dict]:
         facts["forecast"] = ctx.get("forecast")
     if intent == "goals":
         facts["goals"] = ctx.get("goals")
+    if intent == "health":
+        facts["month_summary"] = A.monthly_summary(df)[-2:]
+        facts["safe_to_spend"] = {k: v for k, v in ctx["safe_to_spend"].items() if k != "commitments_detail"} if ctx.get("safe_to_spend") else None
+        facts["forecast"] = ctx.get("forecast")
+    if ctx.get("health"):
+        facts["money_health"] = ctx["health"]
     facts["balance"] = ctx.get("balance")
+    if ctx.get("goal_status"):
+        facts["goals_progress"] = ctx["goal_status"]  # deadlines the user wants to hit; advice must protect them
+    if ctx.get("profile"):
+        facts["about_you"] = ctx["profile"]  # declared by the user in their profile (personalises tone and advice)
     return intent, facts
 
 
@@ -127,19 +146,29 @@ def _week_split(df, month):
 
 
 def template_answer(intent: str, f: dict) -> str:
-    inr = lambda x: f"₹{x:,.0f}"  # noqa: E731
+    inr = lambda x: f"−₹{abs(x):,.0f}" if x < 0 else f"₹{x:,.0f}"  # noqa: E731
     if intent in ("where_money", "overview") and f.get("category_breakdown_current_month"):
         top = f["category_breakdown_current_month"][:3]
         return (f"In {f['current_month']}, most of your spending went to " +
                 ", ".join(f"{c['category']} ({inr(c['total'])}, {c['share_pct']}%)" for c in top) + ".")
     if intent == "category_spend" and "matched" in f:
-        bm = "; ".join(f"{m['month']}: {inr(m['total'])} across {m['count']} transactions" for m in f["by_month"]) or "no matching transactions"
+        bm = "; ".join(f"{m['month']}: {inr(m['total'])} across {m['count']} transaction{'s' if m['count'] != 1 else ''}" for m in f["by_month"]) or "no matching transactions"
         return f"Spending on {f['matched']['value']}: {bm}. Total over the statement: {inr(f['all_period_total'])}."
     if intent == "why_change" and f.get("biggest_changes_vs_previous_month"):
         c = f["biggest_changes_vs_previous_month"][0]
-        drv = (f"mostly because you made more transactions ({c['previous_count']} → {c['current_count']}) while the average stayed around {inr(c['current_avg'])}"
-               if c["main_driver"] == "count" else f"mostly because the average transaction rose ({inr(c['previous_avg'])} → {inr(c['current_avg'])})")
-        return f"Your {c['category']} spending changed by {inr(c['change'])} ({c['previous_month']} → {c['current_month']}), {drv}."
+        return A.describe_change(c)
+    h = f.get("money_health") or {}
+    if intent == "health" or (intent == "running_out" and h and not h.get("is_running_out")):
+        txt = h.get("headline", "")
+        if intent == "running_out":
+            txt = "Good news: your statement shows you're **not** running out of money. " + txt
+        if h.get("strengths"):
+            txt += "\n\n**What the data shows**\n" + "\n".join(f"- {s[0].upper() + s[1:]}" for s in h["strengths"])
+        if h.get("watch_outs"):
+            txt += "\n\n**Worth watching**\n" + "\n".join(f"- {s[0].upper() + s[1:]}" for s in h["watch_outs"])
+        if h.get("status") == "healthy":
+            txt += "\n\n**What you could do**\n1. Move part of the surplus to your goals as soon as money arrives, before it gets spent."
+        return txt
     if intent == "running_out":
         ms = f["month_summary"][-1]
         s = f.get("safe_to_spend") or {}
@@ -159,7 +188,10 @@ def template_answer(intent: str, f: dict) -> str:
         s = f.get("safe_to_spend")
         if not s:
             return "I need your balance to calculate safe-to-spend. Add an opening balance in Settings or upload a statement with a balance column."
-        base = f"Safe-to-spend: {inr(s['safe_to_spend'])} (balance {inr(s['available_balance'])} − commitments {inr(s['upcoming_commitments'])} − savings {inr(s['planned_savings'])} − buffer {inr(s['emergency_buffer'])})."
+        pend = f" − pending {inr(s['pending_debits'])}" if s.get("pending_debits") else ""
+        short = f" You're {inr(s['shortfall'])} short of covering everything." if s.get("shortfall") else ""
+        base = (f"Safe-to-spend {s.get('period', '')}: {inr(s['safe_to_spend'])} (balance {inr(s['available_balance'])}{pend} − commitments "
+                f"{inr(s['upcoming_commitments'])} − goal savings {inr(s['planned_savings'])} − buffer {inr(s['emergency_buffer'])}).{short}")
         pc = f.get("purchase_check")
         if isinstance(pc, dict):
             return base + " " + pc["note"]

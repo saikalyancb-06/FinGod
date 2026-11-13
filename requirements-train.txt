@@ -1,0 +1,9 @@
+# Extra dependencies for downloading the public datasets and retraining the models
+# Install: python -m pip install -r requirements-train.txt
+#   python -m ml.download_datasets           (~6 GB into data/external/)
+#   python -m ml.train_credit_lendingclub    (Lending Club, ~3 min)
+#   python -m ml.train_mule_ibm              (IBM AMLworld HI-Medium, ~15 min, 16 GB RAM)
+-r requirements.txt
+
+huggingface_hub==0.36.2     # downloads the public dataset mirrors from the Hugging Face Hub
+pyarrow==25.0.0             # fast CSV reading (31.9M rows) and parquet feature cache

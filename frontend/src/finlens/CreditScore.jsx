@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fin, inr } from "../api.js";
 import { CountUp } from "../ui.jsx";
 
@@ -58,7 +59,7 @@ export function CashflowScore() {
           <label className="field">I cut discretionary spending by <b style={{ color: "var(--ink)" }}>{cut}%</b><input type="range" min="0" max="60" value={cut} onChange={(e) => setCut(+e.target.value)} style={{ padding: 0, border: "none", accentColor: "var(--coral)" }} /></label>
           <label className="field">My income rises by <b style={{ color: "var(--ink)" }}>{inc}%</b><input type="range" min="0" max="50" value={inc} onChange={(e) => setInc(+e.target.value)} style={{ padding: 0, border: "none", accentColor: "var(--emerald)" }} /></label>
           <label className="field">I invest monthly <b style={{ color: "var(--ink)" }}>{inr(inv)}</b><input type="range" min="0" max="5000" step="100" value={inv} onChange={(e) => setInv(+e.target.value)} style={{ padding: 0, border: "none", accentColor: "var(--sky)" }} /></label>
-          <div className="stat"><div className="label">Projected score</div><div className="value" style={{ color: delta > 0 ? "var(--emerald)" : "var(--ink)" }}><CountUp value={wi.score} format={(v) => Math.round(v)} duration={500} /> <span className="small">{delta > 0 ? `▲ ${delta}` : ""}</span></div></div>
+          <div className="stat"><div className="label">Projected score</div><div className="value" style={{ color: delta > 0 ? "var(--emerald)" : "var(--ink)" }}>{wi.score != null ? <CountUp value={wi.score} format={(v) => Math.round(v)} duration={500} /> : "—"} <span className="small">{delta > 0 ? `▲ ${delta}` : ""}</span></div></div>
         </div>
       </div>
       <p className="small muted" style={{ marginBottom: 0 }}>{cur.method}. {cur.source}</p>
@@ -66,32 +67,82 @@ export function CashflowScore() {
   );
 }
 
-export function LenderModel({ principal, months }) {
-  const [f, setF] = useState({ no_of_dependents: 0, education: "Graduate", self_employed: "No", residential_assets: 0, commercial_assets: 0, luxury_assets: 0, bank_assets: 0 });
+export function LenderModel({ principal, months, rate, affordability }) {
+  const [f, setF] = useState({ purpose: "", product: "Personal Loan", cibil_score: "", credit_history_years: "", past_default: false,
+    late_payments_2y: 0, negative_records: 0, existing_debt_outstanding: "", savings: "" });
   const [r, setR] = useState(null);
   const [busy, setBusy] = useState(false);
-  const run = async () => { setBusy(true); try { setR(await fin.post("/credit/lender-model", { ...f, principal: +principal, months: +months })); } finally { setBusy(false); } };
-  const num = (k, label) => <label className="field" key={k}>{label}<input type="number" min="0" value={f[k]} onChange={(e) => setF({ ...f, [k]: +e.target.value })} /></label>;
+  const [err, setErr] = useState("");
+  const run = async () => {
+    setBusy(true); setErr("");
+    const body = { principal: +principal, months: +months, annual_rate_pct: +rate, purpose: f.purpose, product: f.product,
+      past_default: f.past_default, late_payments_2y: +f.late_payments_2y || 0, negative_records: +f.negative_records || 0 };
+    for (const k of ["cibil_score", "credit_history_years", "existing_debt_outstanding", "savings"]) if (f[k] !== "") body[k] = +f[k];
+    try { setR(await fin.post("/credit/lender-model", body)); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const tone = { likely: ["✅ Approval likely", "linear-gradient(135deg,#00a676,#7cc243)"], borderline: ["⚖️ Borderline", "linear-gradient(135deg,#ffb020,#ff9233)"],
+    unlikely: ["⛔ Approval unlikely", "linear-gradient(135deg,#ff6b4a,#ef476f)"] };
+  const sel = (k, opts) => <select value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })}>{opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>;
+  const num = (k, label, ph) => <label className="field" key={k}>{label}<input type="number" min="0" placeholder={ph} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} /></label>;
   return (
     <div className="card reveal stack">
-      <div className="row between"><h3><span className="chip-ico" style={{ background: "var(--saffron-bg)" }}>🏛️</span>Existing lender-style model (CredWise API)</h3><span className="pill amber">side signal only</span></div>
-      <p className="small muted" style={{ margin: 0 }}>Sends the CredWise loan-approval fields to the team's existing model API. Per the blueprint's model audit, that model's label is <b>historical approval</b>, not repayment, so it never changes the FinLens affordability status above.</p>
+      <div className="row between"><h3 style={{ margin: 0 }}><span className="chip-ico" style={{ background: "var(--saffron-bg)" }}>🏛️</span>Would a lender approve this?</h3>
+        <span className="pill amber">built-in model · side signal</span></div>
+      <p className="small muted" style={{ margin: 0 }}>FinLens's own lender-style model ({"≈"}92% accurate on 10,000 test applications). Income, EMIs and savings come from your statement and profile; add anything you know below for a sharper estimate.</p>
       <div className="grid g4" style={{ gap: 10 }}>
-        {num("no_of_dependents", "Dependents")}
-        <label className="field">Education<select value={f.education} onChange={(e) => setF({ ...f, education: e.target.value })}><option>Graduate</option><option>Not Graduate</option></select></label>
-        <label className="field">Self-employed<select value={f.self_employed} onChange={(e) => setF({ ...f, self_employed: e.target.value })}><option>No</option><option>Yes</option></select></label>
-        {num("bank_assets", "Bank assets ₹")}
-        {num("residential_assets", "Residential assets ₹")}{num("commercial_assets", "Commercial assets ₹")}{num("luxury_assets", "Luxury assets ₹")}
+        <label className="field">Purpose{sel("purpose", [["", "Auto"], ["Education", "Education"], ["Personal", "Personal"], ["Medical", "Medical"], ["Business", "Business"], ["Home Improvement", "Home improvement"], ["Debt Consolidation", "Debt consolidation"]])}</label>
+        <label className="field">Product{sel("product", [["Personal Loan", "Personal loan"], ["Credit Card", "Credit card"], ["Line of Credit", "Line of credit"]])}</label>
+        {num("cibil_score", "CIBIL score (optional)", "e.g. 720")}
+        {num("credit_history_years", "Credit history (years)", "0 if none")}
+        {num("existing_debt_outstanding", "Debt still owed ₹ (optional)", "auto")}
+        {num("savings", "Savings ₹ (optional)", "auto: balance")}
+        {num("late_payments_2y", "Late payments (2 yrs)", "0")}
+        <label className="check" style={{ alignSelf: "end" }}><input type="checkbox" checked={f.past_default} onChange={(e) => setF({ ...f, past_default: e.target.checked })} /><span className="small">I've defaulted on a loan before</span></label>
       </div>
-      <div><button className="subtle" disabled={busy} onClick={run}>{busy ? "Calling…" : "Run lender-style model"}</button></div>
-      {r && (
-        <div className={r.configured && !r.error ? "notice info" : "notice"}>
-          {!r.configured && <div>⚙️ {r.message}</div>}
-          {r.error && <div>⚠️ {r.error}</div>}
-          {r.response && <pre className="small" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(r.response, null, 2)}</pre>}
-          <div className="small" style={{ marginTop: 6 }}><b>Caveat:</b> {r.caveat}</div>
-          <details className="small" style={{ marginTop: 6 }}><summary>Payload sent</summary><pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(r.payload, null, 2)}</pre></details>
-        </div>)}
+      <div><button disabled={busy} onClick={run}>{busy ? "Estimating…" : "Estimate lender approval"}</button></div>
+      {err && <div className="error">{err}</div>}
+      {r && !r.available && <div className="notice">{r.message}</div>}
+      {r?.status === "insufficient_information" && <div className="notice">{r.message}</div>}
+      {r?.approval_probability != null && (
+        <div className="stack">
+          <div className="card" style={{ background: tone[r.status][1], color: "#fff", border: "none" }}>
+            <div className="row between">
+              <div><h2 style={{ color: "#fff", margin: 0 }}>{tone[r.status][0]}</h2>
+                <div className="small" style={{ opacity: .9 }}>{r.inputs.product} · {r.inputs.purpose} · EMI {inr(r.inputs.emi)} · income {inr(r.inputs.monthly_income)}/mo (from {r.inputs.income_source})</div></div>
+              <div className="num" style={{ fontSize: 42, fontWeight: 700 }}><CountUp value={r.approval_probability * 100} format={(v) => `${Math.round(v)}%`} duration={600} /></div>
+            </div>
+          </div>
+          {affordability && affordability !== "eligible" && r.status === "likely" && (
+            <div className="notice">⚠️ A lender might say yes, but FinLens's affordability check says this loan is <b>{affordability.replaceAll("_", " ")}</b> for your cash flow. Approval isn't the same as being able to repay comfortably.</div>)}
+          <div className="grid g2">
+            <div className="card">
+              <h3>🧩 What's driving it</h3>
+              {r.factors.map((x) => (
+                <div key={x.factor} style={{ marginBottom: 8 }}>
+                  <div className="row between small"><span>{x.factor}{x.value != null ? <span className="muted"> · {x.value}</span> : null}</span>
+                    <b style={{ color: x.direction === "helps" ? "var(--emerald)" : "var(--coral)" }}>{x.direction === "helps" ? "▲ helps" : "▼ hurts"}</b></div>
+                  <div className="progress" style={{ height: 6 }}><i style={{ width: `${Math.min(100, Math.abs(x.effect) * 25)}%`, background: x.direction === "helps" ? "var(--emerald)" : "var(--coral)" }} /></div>
+                </div>))}
+            </div>
+            <div className="card">
+              <h3>📈 Approval by credit score</h3>
+              <div style={{ height: 170 }}>
+                <ResponsiveContainer>
+                  <BarChart data={r.credit_score_curve}>
+                    <XAxis dataKey="credit_score" /><YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}%`} /><Tooltip formatter={(v) => `${Math.round(v * 100)}%`} />
+                    <Bar dataKey="approval" radius={[6, 6, 0, 0]}>{r.credit_score_curve.map((c) => <Cell key={c.credit_score} fill={c.approval >= 0.7 ? "#00a676" : c.approval >= 0.4 ? "#ffb020" : "#ef476f"} />)}</Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="small muted">Score used: {r.inputs.credit_score_used}{r.inputs.credit_score_assumed ? " (assumed)" : ""}</div>
+            </div>
+          </div>
+          {r.tips.length > 0 && <div className="card tint"><h3>💡 How to improve your chances</h3><ul style={{ margin: 0 }}>{r.tips.map((t) => <li key={t}>{t}</li>)}</ul></div>}
+          {r.notes.map((n) => <div key={n} className="small muted">ℹ️ {n}</div>)}
+          {r.external_credwise && <details className="small"><summary>Original CredWise API response</summary><pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(r.external_credwise, null, 2)}</pre></details>}
+          <div className="notice small">⚖️ {r.caveat}</div>
+        </div>
+      )}
     </div>
   );
 }

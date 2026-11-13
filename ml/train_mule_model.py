@@ -119,9 +119,9 @@ def main():
     results["model_version"] = f"mule-xgb-{time.strftime('%Y%m%d%H%M')}"
 
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump({"model": xgb, "features": FEATURE_COLUMNS, "threshold": thr, "version": results["model_version"]},
-                ARTIFACT_DIR / "mule_model.joblib")
-    (ARTIFACT_DIR / "mule_metrics.json").write_text(json.dumps(results, indent=2))
+    joblib.dump({"model": xgb, "features": FEATURE_COLUMNS, "threshold": thr, "version": results["model_version"], "feature_set": "legacy_v0"},
+                ARTIFACT_DIR / "mule_model_synthetic.joblib")
+    (ARTIFACT_DIR / "mule_metrics_synthetic.json").write_text(json.dumps(results, indent=2))
     write_card(results)
     print(json.dumps({k: results[k] for k in ["xgboost", "baseline_rules_only(>=1 rule)", "recall_by_typology", "false_positives_by_type"]}, indent=2))
     print(f"done in {time.time()-t0:.1f}s")
@@ -173,7 +173,7 @@ False positives by true account type: `{json.dumps(m['false_positives_by_type'])
 * AML scores must not flow into any credit decision (enforced by architecture: separate service, store and auth).
 """
     (ROOT / "docs").mkdir(exist_ok=True)
-    (ROOT / "docs" / "MULE_MODEL_CARD.md").write_text(card, encoding="utf-8")
+    (ROOT / "docs" / "MULE_MODEL_CARD_SYNTHETIC.md").write_text(card, encoding="utf-8")
 
 
 if __name__ == "__main__":

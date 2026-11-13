@@ -9,7 +9,7 @@ export default defineConfig({
     proxy: {
       // prefixes must not collide with page routes (/finlens, /institution)
       "/x-fin/": { target: "http://127.0.0.1:8001", rewrite: (p) => p.replace(/^\/x-fin/, "") },
-      "/x-inst/": { target: "http://127.0.0.1:8002", rewrite: (p) => p.replace(/^\/x-inst/, "") },
+      "/x-inst/": { target: "http://127.0.0.1:8002", ws: true, rewrite: (p) => p.replace(/^\/x-inst/, "") },
     },
   },
 });

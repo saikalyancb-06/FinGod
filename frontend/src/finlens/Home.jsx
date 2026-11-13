@@ -4,8 +4,10 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieCh
 import { fin, inr, kfmt } from "../api.js";
 import { CAT_COLORS, CAT_EMOJI, CountUp, Skeleton, Stat } from "../ui.jsx";
 import Heatmap from "./Heatmap.jsx";
+import ForYou, { HealthBanner } from "./ForYou.jsx";
+import GuardToday from "./GuardToday.jsx";
 
-export default function Home({ me }) {
+export default function Home({ me, onNudges }) {
   const [d, setD] = useState(null);
   const [month, setMonth] = useState(null);
   const [err, setErr] = useState("");
@@ -25,11 +27,15 @@ export default function Home({ me }) {
         <select value={d.month} onChange={(e) => setMonth(e.target.value)}>{d.months.map((m) => <option key={m}>{m}</option>)}</select>
       </div>
 
+      <HealthBanner h={d.health} />
+      <GuardToday />
+      <ForYou onCount={onNudges} />
+
       <div className="grid g4 stagger">
         <div className="card hero stat">
           <div className="label">Safe to spend</div>
           <div className="value">{sts ? <CountUp value={sts.safe_to_spend} format={inr} /> : "—"}</div>
-          <div className="sub">until month end, after commitments, savings &amp; buffer</div>
+          <div className="sub">{sts?.period || "until month end"}, after bills, goal savings &amp; buffer</div>
         </div>
         <Stat color="sky" icon="💰" label="Balance" value={d.balance.balance} format={inr} sub={d.balance.source} />
         <Stat color="emerald" icon="📥" label={`Inflows · ${d.month}`} value={cur.inflow_total} format={inr} sub={`Income ${inr(cur.income)}. Refunds/transfers aren't counted as income.`} />
@@ -41,7 +47,7 @@ export default function Home({ me }) {
           <h3 style={{ color: "#fff" }}>💡 FinLens insight</h3>
           <p style={{ margin: 0, fontSize: 15, maxWidth: 820 }}>{d.insight}</p>
           <div className="row" style={{ marginTop: 14, position: "relative", zIndex: 1 }}>
-            <Link className="btn small" style={{ background: "#fff", color: "var(--coral)" }} to="/finlens/ask?q=Why%20am%20I%20running%20out%20of%20money%3F">Ask why →</Link>
+            <Link className="btn small" style={{ background: "#fff", color: "var(--coral)" }} to={`/finlens/ask?q=${encodeURIComponent(d.health?.is_running_out ? "Why am I running out of money?" : "How am I doing this month?")}`}>{d.health?.is_running_out ? "Ask why →" : "How am I doing? →"}</Link>
             <Link className="btn small" style={{ background: "rgba(255,255,255,.2)" }} to="/finlens/spending">Find cheaper options</Link>
           </div>
         </div>

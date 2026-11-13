@@ -9,6 +9,7 @@ import Network from "./Network.jsx";
 import AccountView from "./AccountView.jsx";
 import Audit from "./Audit.jsx";
 import Model from "./Model.jsx";
+import { LiveProvider } from "./LiveContext.jsx";
 
 function Login({ onDone }) {
   const [f, setF] = useState({ username: "", password: "" });
@@ -58,6 +59,7 @@ export default function InstApp() {
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
   if (!me) return <div className="inst main"><div className="skeleton" /></div>;
   return (
+    <LiveProvider>
     <div className="inst shell">
       <Blobs />
       <aside className="sidebar">
@@ -83,5 +85,6 @@ export default function InstApp() {
         </Routes>
       </main>
     </div>
+    </LiveProvider>
   );
 }

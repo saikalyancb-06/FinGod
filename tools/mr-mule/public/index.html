@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MrMule Live</title>
+<style>
+  :root {
+    --bg: #fff8ef; --card: #ffffff; --ink: #14303a; --muted: #6b7f86; --line: #f0e3d0;
+    --coral: #ff6b4a; --emerald: #00a676; --sky: #1e9bf0; --amber: #ffb020; --rose: #ef476f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: var(--ink);
+    background: radial-gradient(900px 600px at 0% 0%, #ffe6d6, transparent), radial-gradient(900px 600px at 100% 0%, #dff4ff, transparent), var(--bg); min-height: 100vh; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 22px 16px 40px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { margin: 0; font-size: 26px; }
+  h1 span { background: linear-gradient(90deg, var(--coral), var(--amber)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { color: var(--muted); margin: 4px 0 0; font-size: 14px; }
+  .status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: #fff; box-shadow: 0 4px 14px rgba(20,48,58,.08); font-size: 13px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #c7cfd2; }
+  .dot.on { background: var(--emerald); box-shadow: 0 0 0 0 rgba(0,166,118,.6); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 70% { box-shadow: 0 0 0 10px rgba(0,166,118,0); } 100% { box-shadow: 0 0 0 0 rgba(0,166,118,0); } }
+  .grid { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .card { background: var(--card); border-radius: 20px; padding: 16px; box-shadow: 0 10px 30px rgba(20,48,58,.07); border: 1px solid #fff; }
+  .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; margin: 0 0 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: none; cursor: pointer; padding: 7px 10px; border-radius: 12px; font-weight: 700; font-size: 13px; background: #f5efe6; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; transition: transform .12s, background .12s; }
+  .chip:hover { transform: translateY(-1px); }
+  .chip .av { width: 22px; height: 22px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-size: 11px; }
+  .chip.active { color: #fff; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input { padding: 9px 11px; border-radius: 12px; border: 1.5px solid var(--line); font-size: 14px; color: var(--ink); background: #fffdf9; outline: none; }
+  input:focus { border-color: var(--sky); }
+  .amt { width: 130px; font-weight: 700; }
+  .quick button { border: none; background: #eef7ff; color: var(--sky); padding: 6px 9px; border-radius: 10px; cursor: pointer; font-weight: 700; font-size: 12px; }
+  .send { width: 100%; margin-top: 12px; border: none; cursor: pointer; padding: 12px; border-radius: 14px; font-weight: 800; font-size: 15px; color: #fff;
+    background: linear-gradient(135deg, var(--coral), var(--amber)); box-shadow: 0 8px 20px rgba(255,107,74,.3); }
+  .send:disabled { opacity: .5; cursor: not-allowed; }
+  .flow { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; font-weight: 700; color: var(--muted); font-size: 13px; }
+  .pattern { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pattern button { border: none; cursor: pointer; text-align: left; padding: 10px; border-radius: 14px; background: #fff6ea; color: var(--ink); font-size: 12px; line-height: 1.3; }
+  .pattern button b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .pattern button:hover { background: #ffecd6; }
+  .msg { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
+  .graph-card { position: relative; padding: 0; overflow: hidden; }
+  .graph-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px 0; gap: 10px; flex-wrap: wrap; }
+  svg { width: 100%; height: 440px; display: block; }
+  .legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 16px; }
+  .stat { background: #fff; border-radius: 16px; padding: 12px 14px; box-shadow: 0 6px 18px rgba(20,48,58,.06); }
+  .stat .v { font-size: 22px; font-weight: 800; }
+  .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+  .lower { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; }
+  .feed { max-height: 380px; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .tx { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 14px; background: #fffaf3; animation: slideIn .35s ease; }
+  .tx.new { background: #fff1e0; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+  .pair { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
+  .pair .av { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 800; }
+  .pair .arrow { color: var(--muted); font-size: 16px; }
+  .tx .meta { font-size: 11px; color: var(--muted); font-family: ui-monospace, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tx .money { font-weight: 800; font-size: 16px; color: var(--emerald); text-align: right; }
+  .acct { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .acct .nm { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
+  .acct .nm .av { width: 22px; height: 22px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-size: 10px; }
+  .bars { display: flex; flex-direction: column; gap: 3px; }
+  .bar { height: 8px; border-radius: 6px; transition: width .4s; min-width: 2px; }
+  .bar.in { background: linear-gradient(90deg, var(--emerald), #5fd3a6); }
+  .bar.out { background: linear-gradient(90deg, var(--coral), #ff9d7f); }
+  .tiny { font-size: 11px; color: var(--muted); }
+  .hint { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 800; background: #fff1c9; color: #9a6400; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; font-size: 12px; color: var(--muted); font-weight: 700; }
+  pre { background: #14303a; color: #d8f3ff; padding: 10px; border-radius: 12px; font-size: 11px; max-height: 180px; overflow: auto; margin: 8px 0 0; }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 24px 0; }
+  .node-label { font-weight: 800; font-size: 12px; fill: var(--ink); pointer-events: none; }
+  .edge-label { font-size: 10px; font-weight: 700; fill: var(--muted); }
+  @media (max-width: 980px) { .grid, .lower { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); } svg { height: 340px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>🐴 Mr<span>Mule</span> Live</h1>
+      <p class="sub">Send test payments between accounts. Every payment is broadcast over WebSocket as a CSV row that MuleScope can ingest live.</p>
+    </div>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">From</div>
+      <div class="chips" id="fromChips"></div>
+      <div class="label" style="margin-top:14px">To</div>
+      <div class="chips" id="toChips"></div>
+      <div class="row" style="margin-top:12px">
+        <input id="newAcct" placeholder="Add account e.g. ACC_F" style="flex:1" maxlength="20" />
+        <button class="chip" id="addAcct">＋ Add</button>
+      </div>
+      <div class="label" style="margin-top:14px">Amount (₹)</div>
+      <div class="row">
+        <input id="amount" class="amt" type="number" min="1" step="0.01" value="2500" />
+        <div class="quick row" id="quick"></div>
+      </div>
+      <div class="flow" id="flow">Pick a sender and a receiver</div>
+      <button class="send" id="sendBtn" disabled>Send payment</button>
+      <div class="msg" id="msg"></div>
+
+      <div class="label" style="margin-top:18px">Send a whole pattern</div>
+      <div class="pattern">
+        <button data-p="fanin"><b>🧲 Fan-in</b>5 accounts pay one account within seconds</button>
+        <button data-p="chain"><b>⛓️ Pass-through</b>Money hops A→B→C→D, a little less each hop</button>
+        <button data-p="cycle"><b>🔁 Cycle</b>₹60k goes round A→B→C→A</button>
+        <button data-p="split"><b>✂️ Structuring</b>4 payments of ₹45–50k from one account</button>
+        <button data-p="normal"><b>🛒 Normal day</b>A few everyday small payments</button>
+        <button data-p="fanout"><b>📤 Fan-out</b>One account pays out to 5 accounts</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="card graph-card">
+        <div class="graph-head">
+          <div class="label" style="margin:0">Live money map</div>
+          <div class="legend"><span><i style="background:var(--emerald)"></i>money in</span><span><i style="background:var(--coral)"></i>money out</span><span>line thickness = total sent</span><span><span class="hint">hint</span> = looks like a mule pattern</span></div>
+        </div>
+        <svg id="svg" viewBox="0 0 900 440" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="14" markerHeight="14" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c9b9a3" /></marker>
+            <radialGradient id="coin" cx="35%" cy="35%"><stop offset="0%" stop-color="#fff3b0" /><stop offset="100%" stop-color="#ffb020" /></radialGradient>
+          </defs>
+          <g id="edges"></g><g id="nodes"></g><g id="coins"></g>
+        </svg>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="k">Payments</div><div class="v" id="sCount">0</div></div>
+        <div class="stat"><div class="k">Total moved</div><div class="v" id="sTotal">₹0</div></div>
+        <div class="stat"><div class="k">Accounts</div><div class="v" id="sAccts">0</div></div>
+        <div class="stat"><div class="k">Biggest</div><div class="v" id="sBig">₹0</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lower">
+    <div class="card">
+      <div class="label">Live transactions</div>
+      <div class="feed" id="feed"><div class="empty">No payments yet. Send one, or try a pattern. 👆</div></div>
+      <details><summary>Raw CSV (what MuleScope receives)</summary><pre id="csv">transaction_id,sender_id,receiver_id,amount,timestamp</pre></details>
+    </div>
+    <div class="card">
+      <div class="label">Money in / out per account</div>
+      <div id="accts"><div class="empty">Accounts appear here as money moves.</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PALETTE = ["#ff6b4a", "#00a676", "#1e9bf0", "#ffb020", "#e8467c", "#13b5b1", "#ff9233", "#7cc243", "#3a86ff", "#f15bb5"];
+const accounts = ["ACC_A", "ACC_B", "ACC_C", "ACC_D", "ACC_E"];
+const color = {};
+const stats = {}; // acct -> {in, out, inFrom:Set, outTo:Set, lastIn:[ts,amt], forwardedFast}
+const edges = {}; // "a|b" -> {total, count}
+const txs = [];
+let from = null, to = null;
+const $ = (id) => document.getElementById(id);
+const inr = (v) => "₹" + Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+const short = (a) => a.replace(/^ACC_/, "");
+
+function ensure(a) {
+  if (!accounts.includes(a)) accounts.push(a);
+  if (!color[a]) color[a] = PALETTE[Object.keys(color).length % PALETTE.length];
+  if (!stats[a]) stats[a] = { in: 0, out: 0, inFrom: new Set(), outTo: new Set(), recentIn: [], fastFwd: 0 };
+}
+accounts.forEach(ensure);
+
+function chip(a, active, onClick) {
+  const b = document.createElement("button");
+  b.className = "chip" + (active ? " active" : "");
+  if (active) b.style.background = color[a];
+  b.innerHTML = `<span class="av" style="background:${active ? "rgba(255,255,255,.3)" : color[a]}">${short(a)}</span>${a}`;
+  b.onclick = onClick;
+  return b;
+}
+function renderPickers() {
+  $("fromChips").replaceChildren(...accounts.map((a) => chip(a, a === from, () => { from = a; if (to === a) to = null; renderPickers(); })));
+  $("toChips").replaceChildren(...accounts.map((a) => chip(a, a === to, () => { to = a; if (from === a) from = null; renderPickers(); })));
+  $("sendBtn").disabled = !(from && to);
+  $("flow").innerHTML = from && to
+    ? `<span class="chip active" style="background:${color[from]}">${from}</span> ➜ ${inr($("amount").value || 0)} ➜ <span class="chip active" style="background:${color[to]}">${to}</span>`
+    : "Pick a sender and a receiver";
+}
+[500, 2500, 10000, 49000].forEach((v) => {
+  const b = document.createElement("button"); b.textContent = inr(v); b.onclick = () => { $("amount").value = v; renderPickers(); };
+  $("quick").appendChild(b);
+});
+$("amount").oninput = renderPickers;
+$("addAcct").onclick = () => {
+  let v = $("newAcct").value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "");
+  if (!v) return;
+  if (!v.startsWith("ACC_")) v = "ACC_" + v;
+  ensure(v); $("newAcct").value = ""; renderPickers(); drawGraph();
+};
+$("newAcct").addEventListener("keydown", (e) => { if (e.key === "Enter") $("addAcct").click(); });
+
+// ---------- graph ----------
+function positions() {
+  const n = accounts.length, cx = 450, cy = 220, R = Math.min(170, 70 + n * 14);
+  const pos = {};
+  accounts.forEach((a, i) => { const t = -Math.PI / 2 + (2 * Math.PI * i) / n; pos[a] = [cx + R * 1.55 * Math.cos(t), cy + R * Math.sin(t)]; });
+  return pos;
+}
+function hintFor(a) {
+  const s = stats[a];
+  if (s.inFrom.size >= 4 && s.outTo.size >= 1) return "fan-in → out";
+  if (s.inFrom.size >= 4) return "fan-in";
+  if (s.outTo.size >= 4) return "fan-out";
+  if (s.fastFwd >= 1) return "pass-through";
+  return null;
+}
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+function curve(p, q, bend) {
+  const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2, dx = q[0] - p[0], dy = q[1] - p[1], len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len, ny = dx / len;
+  return { c: [mx + nx * bend, my + ny * bend] };
+}
+function shorten(p, q, r) { const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy) || 1; return [q[0] - (dx / L) * r, q[1] - (dy / L) * r]; }
+function nodeR(a) { const s = stats[a]; return 22 + Math.min(16, Math.log10(1 + s.in + s.out) * 3); }
+function drawGraph() {
+  const pos = positions();
+  const maxE = Math.max(1, ...Object.values(edges).map((e) => e.total));
+  const eg = $("edges"); eg.replaceChildren();
+  for (const k in edges) {
+    const [a, b] = k.split("|"), e = edges[k];
+    const back = edges[`${b}|${a}`] ? 28 : 14;
+    const p = pos[a], q = pos[b], { c } = curve(p, q, back);
+    const end = shorten(c, q, nodeR(b) + 4);
+    const d = `M${p[0]},${p[1]} Q${c[0]},${c[1]} ${end[0]},${end[1]}`;
+    eg.appendChild(el("path", { d, fill: "none", stroke: "#e5d6c1", "stroke-width": 1.5 + 7 * Math.sqrt(e.total / maxE), "stroke-linecap": "round", "marker-end": "url(#arrow)", opacity: .9, id: `e-${a}-${b}` }));
+    const t = el("text", { x: c[0], y: c[1] - 4, "text-anchor": "middle", class: "edge-label" });
+    t.textContent = `${inr(e.total)}${e.count > 1 ? " · " + e.count + "×" : ""}`;
+    eg.appendChild(t);
+  }
+  const ng = $("nodes"); ng.replaceChildren();
+  accounts.forEach((a) => {
+    const [x, y] = pos[a], r = nodeR(a), s = stats[a], h = hintFor(a);
+    const g = el("g", {});
+    if (h) g.appendChild(el("circle", { cx: x, cy: y, r: r + 7, fill: "none", stroke: "#ffb020", "stroke-width": 3, "stroke-dasharray": "5 4" }));
+    const tot = s.in + s.out;
+    g.appendChild(el("circle", { cx: x, cy: y, r, fill: color[a] }));
+    if (tot > 0) { // in/out ring
+      const C = 2 * Math.PI * (r + 2), inFrac = s.in / tot;
+      g.appendChild(el("circle", { cx: x, cy: y, r: r + 2, fill: "none", stroke: "#00a676", "stroke-width": 4, "stroke-dasharray": `${C * inFrac} ${C}`, transform: `rotate(-90 ${x} ${y})` }));
+      g.appendChild(el("circle", { cx: x, cy: y, r: r + 2, fill: "none", stroke: "#ff6b4a", "stroke-width": 4, "stroke-dasharray": `0 ${C * inFrac} ${C * (1 - inFrac)} ${C}`, transform: `rotate(-90 ${x} ${y})` }));
+    }
+    const lab = el("text", { x, y: y + 4, "text-anchor": "middle", class: "node-label", fill: "#fff" }); lab.style.fill = "#fff"; lab.textContent = short(a);
+    g.appendChild(lab);
+    const nm = el("text", { x, y: y + r + 18, "text-anchor": "middle", class: "node-label" }); nm.textContent = a;
+    g.appendChild(nm);
+    if (h) { const ht = el("text", { x, y: y - r - 12, "text-anchor": "middle", class: "edge-label" }); ht.style.fill = "#9a6400"; ht.textContent = "⚠ " + h; g.appendChild(ht); }
+    ng.appendChild(g);
+  });
+}
+function flyCoin(a, b, amt) {
+  const pos = positions(), p = pos[a], q = pos[b];
+  const back = edges[`${b}|${a}`] ? 28 : 14, { c } = curve(p, q, back);
+  const coin = el("g", {});
+  coin.appendChild(el("circle", { r: 13, fill: "url(#coin)", stroke: "#e39a00", "stroke-width": 1.5 }));
+  const t = el("text", { y: 4, "text-anchor": "middle", "font-size": 12, "font-weight": 800, fill: "#7a4a00" }); t.textContent = "₹"; coin.appendChild(t);
+  const lbl = el("text", { y: -18, "text-anchor": "middle", "font-size": 11, "font-weight": 800, fill: "#14303a" }); lbl.textContent = inr(amt); coin.appendChild(lbl);
+  $("coins").appendChild(coin);
+  const start = performance.now(), dur = 900;
+  (function step(now) {
+    const k = Math.min(1, (now - start) / dur), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    const x = (1 - e) ** 2 * p[0] + 2 * (1 - e) * e * c[0] + e * e * q[0], y = (1 - e) ** 2 * p[1] + 2 * (1 - e) * e * c[1] + e * e * q[1];
+    coin.setAttribute("transform", `translate(${x},${y}) scale(${1 + Math.sin(k * Math.PI) * .25})`);
+    if (k < 1) requestAnimationFrame(step); else { coin.remove(); }
+  })(start);
+}
+
+// ---------- incoming rows ----------
+function onRow(row) {
+  const [id, a, b, amtS, ts] = row.split(",");
+  const amt = Number(amtS);
+  ensure(a); ensure(b);
+  const sa = stats[a], sb = stats[b], now = Date.now();
+  sa.out += amt; sa.outTo.add(b);
+  sb.in += amt; sb.inFrom.add(a);
+  // pass-through hint: sender received >= 80% of this amount within the last 10 minutes
+  if (sa.recentIn.some(([t, v]) => now - t < 10 * 60 * 1000 && amt >= .8 * v && amt <= 1.02 * v)) sa.fastFwd += 1;
+  sb.recentIn.push([now, amt]);
+  const k = `${a}|${b}`; edges[k] = edges[k] || { total: 0, count: 0 }; edges[k].total += amt; edges[k].count += 1;
+  txs.unshift({ id, a, b, amt, ts });
+  $("csv").textContent += "\n" + row;
+  drawGraph(); flyCoin(a, b, amt); renderFeed(); renderAccts(); renderStats(); renderPickers();
+}
+function renderFeed() {
+  const f = $("feed");
+  f.replaceChildren(...txs.slice(0, 60).map((t, i) => {
+    const d = document.createElement("div");
+    d.className = "tx" + (i === 0 ? " new" : "");
+    d.innerHTML = `<div class="pair"><span class="av" style="background:${color[t.a]}">${short(t.a)}</span><span class="arrow">➜</span><span class="av" style="background:${color[t.b]}">${short(t.b)}</span></div>
+      <div><div style="font-weight:700;font-size:13px">${t.a} → ${t.b}</div><div class="meta">${t.ts} · ${t.id}</div></div>
+      <div class="money">${inr(t.amt)}</div>`;
+    return d;
+  }));
+}
+function renderAccts() {
+  const act = accounts.filter((a) => stats[a].in + stats[a].out > 0);
+  if (!act.length) return;
+  const max = Math.max(...act.map((a) => Math.max(stats[a].in, stats[a].out)));
+  $("accts").replaceChildren(...act.sort((x, y) => (stats[y].in + stats[y].out) - (stats[x].in + stats[x].out)).map((a) => {
+    const s = stats[a], h = hintFor(a), d = document.createElement("div");
+    d.className = "acct";
+    d.innerHTML = `<div class="nm"><span class="av" style="background:${color[a]}">${short(a)}</span>${a}${h ? `<span class="hint">${h}</span>` : ""}</div>
+      <div class="bars"><div class="bar in" style="width:${(s.in / max) * 100}%"></div><div class="tiny">in ${inr(s.in)} from ${s.inFrom.size}</div>
+      <div class="bar out" style="width:${(s.out / max) * 100}%"></div><div class="tiny">out ${inr(s.out)} to ${s.outTo.size}</div></div>`;
+    return d;
+  }));
+}
+function renderStats() {
+  $("sCount").textContent = txs.length;
+  $("sTotal").textContent = inr(txs.reduce((s, t) => s + t.amt, 0));
+  $("sAccts").textContent = accounts.filter((a) => stats[a].in + stats[a].out > 0).length;
+  $("sBig").textContent = inr(Math.max(0, ...txs.map((t) => t.amt)));
+}
+
+// ---------- socket ----------
+let ws;
+function connect() {
+  ws = new WebSocket(`ws://${location.host}`);
+  ws.onopen = () => { $("status").textContent = "Live · broadcasting"; $("dot").classList.add("on"); };
+  ws.onclose = () => { $("status").textContent = "Disconnected · retrying"; $("dot").classList.remove("on"); setTimeout(connect, 1500); };
+  ws.onmessage = (evt) => {
+    let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+    if (msg.type === "csv") onRow(msg.row);
+    else if (msg.type === "error") $("msg").textContent = "⚠ " + msg.message;
+  };
+}
+connect();
+function send(a, b, amount) {
+  if (!ws || ws.readyState !== 1) { $("msg").textContent = "Not connected yet."; return; }
+  ws.send(JSON.stringify({ type: "tx", from: a, to: b, amount: Number(amount) }));
+}
+$("sendBtn").onclick = () => {
+  const amount = Number($("amount").value || 0);
+  if (!(amount > 0)) { $("msg").textContent = "Enter an amount above ₹0."; return; }
+  send(from, to, amount); $("msg").textContent = `Sent ${inr(amount)} from ${from} to ${to}.`;
+};
+
+// ---------- patterns ----------
+const rnd = (lo, hi) => Math.round((lo + Math.random() * (hi - lo)) * 100) / 100;
+function pick(n, exclude = []) { return accounts.filter((a) => !exclude.includes(a)).slice(0, n); }
+function extra(n, prefix) { const out = []; for (let i = 1; i <= n; i++) { const a = `ACC_${prefix}${i}`; ensure(a); out.push(a); } return out; }
+function sequence(list) { list.forEach(([a, b, amt], i) => setTimeout(() => send(a, b, amt), i * 450)); }
+document.querySelectorAll(".pattern button").forEach((btn) => btn.onclick = () => {
+  const p = btn.dataset.p;
+  if (p === "fanin") {
+    const hub = to || "ACC_M"; ensure(hub);
+    const payers = extra(5, "V").filter((x) => x !== hub);
+    sequence([...payers.map((v) => [v, hub, rnd(8000, 20000)]), [hub, extra(1, "X")[0], 60000]]);
+  } else if (p === "fanout") {
+    const src = from || "ACC_M"; ensure(src);
+    sequence(extra(5, "O").map((o) => [src, o, rnd(9000, 15000)]));
+  } else if (p === "chain") {
+    const c = extra(4, "P"); let amt = 80000;
+    sequence([["ACC_A", c[0], amt], ...c.slice(0, 3).map((x, i) => [x, c[i + 1], (amt = Math.round(amt * .98))])]);
+  } else if (p === "cycle") {
+    const c = extra(3, "R");
+    sequence([[c[0], c[1], 60000], [c[1], c[2], 59000], [c[2], c[0], 58000]]);
+  } else if (p === "split") {
+    const src = from || "ACC_S"; ensure(src);
+    sequence(extra(4, "T").map((t) => [src, t, rnd(45000, 49900)]));
+  } else {
+    const base = pick(5);
+    sequence([[base[0], base[1], 250], [base[2], base[3], 480], [base[1], base[4], 120], [base[3], base[0], 900]]);
+  }
+  renderPickers(); drawGraph();
+  $("msg").textContent = `Sending the ${btn.querySelector("b").textContent.replace(/^\S+\s/, "")} pattern…`;
+});
+renderPickers(); drawGraph();
+</script>
+</body>
+</html>

@@ -206,7 +206,8 @@ def test_score_and_lender_bridge_endpoints():
     s = c.post("/api/credit/score", json={"discretionary_cut_pct": 30}).json()
     assert s["what_if"]["score"] >= s["current"]["score"]
     lm = c.post("/api/credit/lender-model", json={"principal": 30000, "months": 12}).json()
-    assert lm["configured"] is False and lm["payload"]["loan_term"] == 12 and "historical" in lm["caveat"]
+    assert lm["available"] and lm["status"] in {"likely", "borderline", "unlikely"} and 0 <= lm["approval_probability"] <= 1
+    assert lm["factors"] and len(lm["credit_score_curve"]) == 6 and "not an approval" in lm["caveat"]
 
 
 def test_table_pdf_uses_pymupdf_or_pdfplumber():
@@ -224,3 +225,14 @@ def test_verifier_rejects_invented_and_approximate_figures():
     assert unverified_numbers("You spent **₹13,083** and kept ₹417, up ₹2,542.", facts) == []
     bad = unverified_numbers("Together ₹5,592 extra; trimming saves ≈₹1,300 (~₹2,000).", facts)
     assert {"₹5,592", "₹1,300", "₹2,000"} <= set(bad)
+
+
+def test_credit_band_uses_lending_club_model():
+    df = A.to_df(parse_statement(SAMPLE)[0])
+    r = credit.assess(df, 30000, 14, 12)
+    sig = r["model_signal"]
+    assert sig and "lc" in sig["model_version"] and sig["band"] in {"lower", "moderate", "higher"}
+    assert 0 < sig["observed_default_rate_in_band"] < 1
+    lo = credit.assess(df, 5000, 12, 6)["model_signal"]["modelled_probability"]
+    hi = credit.assess(df, 300000, 12, 60)["model_signal"]["modelled_probability"]
+    assert hi > lo  # a much larger, longer loan for the same income must look riskier

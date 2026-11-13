@@ -238,16 +238,23 @@ def compute_features(df: pd.DataFrame) -> AnalysisResult:
         passed_fast = 0.0
         if len(gi) and len(go):
             ot = go["timestamp"].values
-            oa = go["amount"].values
+            left = go["amount"].values.astype(float).copy()  # each outflow can only be "forwarding" once (FIFO)
+            win = np.timedelta64(RULES["pass_through_max_minutes"], "m")
             for t, a in zip(gi["timestamp"].values, gi["amount"].values):
                 idx = np.searchsorted(ot, t)
                 if idx < len(ot):
                     holds.append((ot[idx] - t) / np.timedelta64(1, "m"))
-                lim = t + np.timedelta64(RULES["pass_through_max_minutes"], "m")
-                j = np.searchsorted(ot, lim, side="right")
-                passed_fast += min(a, float(oa[idx:j].sum()))
+                j = np.searchsorted(ot, t + win, side="right")
+                need = float(a)
+                for k in range(idx, j):
+                    if need <= 0:
+                        break
+                    take = min(need, left[k])
+                    left[k] -= take
+                    need -= take
+                    passed_fast += take
         pt_ratio = min(out_amt, in_amt) / in_amt if in_amt else 0.0
-        fast_ratio = passed_fast / in_amt if in_amt else 0.0
+        fast_ratio = min(passed_fast, out_amt, in_amt) / in_amt if in_amt else 0.0
         med_hold = float(np.median(holds)) if holds else 1e5
         if in_amt >= 20_000 and fast_ratio >= RULES["pass_through_ratio"]:
             ev["rules"]["rapid_pass_through"] = {

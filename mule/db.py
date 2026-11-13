@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, create_engine
+from sqlalchemy import Boolean, JSON, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from shared.config import MULE_DATA_KEY, MULE_DATABASE_URL
@@ -77,6 +77,8 @@ class Alert(Base):
     linked_alerts: Mapped[list] = mapped_column(JSON, default=list)
     ring_ids: Mapped[list] = mapped_column(JSON, default=list)
     pattern_score: Mapped[float] = mapped_column(Float, default=0.0)
+    priority_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    model_reliable: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(30), default="open")
     assigned_to: Mapped[str | None] = mapped_column(String(80), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -105,6 +107,13 @@ class AuditLog(Base):
 
 def init_db():
     Base.metadata.create_all(engine)
+    from sqlalchemy import inspect, text
+    cols = {c["name"] for c in inspect(engine).get_columns("alerts")}
+    with engine.begin() as conn:
+        if "priority_reason" not in cols:
+            conn.execute(text("ALTER TABLE alerts ADD COLUMN priority_reason VARCHAR(80)"))
+        if "model_reliable" not in cols:
+            conn.execute(text("ALTER TABLE alerts ADD COLUMN model_reliable BOOLEAN DEFAULT 1"))
 
 
 init_db()

@@ -3,6 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import { fin, inr } from "../api.js";
 import { CAT_COLORS, CAT_EMOJI } from "../ui.jsx";
 import { UploadCard } from "./Onboarding.jsx";
+import { NaturePill } from "./SpendGuard.jsx";
+
+const NEXT = { need: "want", want: "flex", flex: "need" };
 
 export default function Transactions({ onChange }) {
   const [sp, setSp] = useSearchParams();
@@ -10,6 +13,16 @@ export default function Transactions({ onChange }) {
   const [cats, setCats] = useState({ spending: [], credit: [] });
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState("");
+  const [nat, setNat] = useState({});
+  const loadNat = () => fin.get("/guard/natures").then(setNat).catch(() => {});
+  useEffect(() => { loadNat(); }, []);
+  const flip = async (t) => {
+    const cur = nat[t.id]?.nature || "flex";
+    const n = NEXT[cur] || "need";
+    await fin.post("/guard/rules", { scope: "merchant", key: t.merchant_key, nature: n });
+    setMsg(`✅ ${t.merchant || t.description} is now always a ${n === "flex" ? "'depends'" : n} for you. Spend Guard uses this for alerts and limits.`);
+    loadNat();
+  };
   const category = sp.get("category") || "";
   const month = sp.get("month") || "";
   const load = () => {
@@ -51,12 +64,13 @@ export default function Transactions({ onChange }) {
       <div className="card reveal" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Description</th><th>Category</th><th className="r">Amount</th><th className="r">Balance</th><th>Flags</th></tr></thead>
+            <thead><tr><th>Date</th><th>Description</th><th>Need / want</th><th>Category</th><th className="r">Amount</th><th className="r">Balance</th><th>Flags</th></tr></thead>
             <tbody>
               {rows?.map((t) => (
                 <tr key={t.id} style={{ opacity: t.excluded ? 0.5 : 1 }}>
                   <td className="num muted">{t.date}</td>
-                  <td><b>{t.merchant}</b><div className="muted small">{t.description}</div></td>
+                  <td><b>{t.merchant}</b><div className="muted small">{t.description}{t.time ? ` · ${t.time}` : ""}{t.source && t.source !== "statement" ? ` · ${t.source}` : ""}</div></td>
+                  <td>{t.type === "debit" && nat[t.id] && <button className="nature-btn" title={`${nat[t.id].reason}. Click to change for this merchant.`} onClick={() => flip(t)}><NaturePill n={nat[t.id].nature} reason={nat[t.id].reason} /></button>}</td>
                   <td>
                     <div className="row" style={{ gap: 6 }}>
                       <span style={{ width: 10, height: 10, borderRadius: 4, background: CAT_COLORS[t.category] || "#00a676" }} />

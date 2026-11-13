@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { fin } from "../api.js";
+import ProfileWizard from "./ProfileWizard.jsx";
 
 const LABELS = { analytics: "📊 Spending analytics", smart_spending: "🛍️ Smart Spending personalisation", credit: "🏦 Credit affordability" };
 
@@ -17,6 +18,10 @@ export default function Settings({ me, onChange }) {
   return (
     <div className="stack" style={{ maxWidth: 860 }}>
       <div className="page-head reveal"><div><h1>Settings & privacy 🛡️</h1><p className="muted">You're in control of what FinLens uses and keeps.</p></div>{msg && <span className="pill green">{msg}</span>}</div>
+      <details className="card reveal" open={!me.profile?.completed}>
+        <summary style={{ cursor: "pointer", fontWeight: 800 }}>🙋 Your profile: who you are, income, goals and preferences</summary>
+        <div style={{ marginTop: 14 }}><ProfileWizard compact onDone={() => { setMsg("✅ Profile saved"); onChange?.(); }} /></div>
+      </details>
       <div className="card stack reveal">
         <h3>Consents</h3>
         {Object.entries(me.purposes).map(([p, text]) => (

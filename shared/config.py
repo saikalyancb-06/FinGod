@@ -33,6 +33,9 @@ DEFAULT_LOCATION = env("DEFAULT_LOCATION", "Bengaluru, Karnataka, India")
 # --- Optional: the team's existing CredWise loan-approval model API (POST /api/loan/predict) ---
 LOAN_API_BASE_URL = env("LOAN_API_BASE_URL")
 
+# --- Sarvam AI (Indian-language translation, speech-to-text, text-to-speech) ---
+SARVAM_API_KEY = env("SARVAM_API_KEY")
+
 # --- Purpose-separated stores (SQLite now, Postgres by changing the URL) ---
 FINLENS_DATABASE_URL = env("FINLENS_DATABASE_URL", f"sqlite:///{(STORE_DIR / 'finlens.db').as_posix()}")
 MULE_DATABASE_URL = env("MULE_DATABASE_URL", f"sqlite:///{(STORE_DIR / 'mule.db').as_posix()}")

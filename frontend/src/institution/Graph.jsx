@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import cytoscape from "cytoscape";
 
 const NODE = { high: "#ef476f", medium: "#ffb020", low: "#1e9bf0" };
@@ -61,7 +61,9 @@ export function GraphLegend() {
   );
 }
 
-export default function Graph({ data, onSelect, height = 540 }) {
+export default function Graph({ data, onSelect, height = 540, loadTrail }) {
+  const [replay, setReplay] = useState(null); // {i, n, ts, amount, src, dst}
+  const timer = useRef(null);
   const ref = useRef();
   const cyRef = useRef();
   useEffect(() => {
@@ -84,6 +86,10 @@ export default function Graph({ data, onSelect, height = 540 }) {
         { selector: ".faded", style: { opacity: 0.12 } },
         { selector: "edge.hl", style: { "line-color": "#ff6b4a", "target-arrow-color": "#ff6b4a", opacity: 1 } },
         { selector: "node:selected", style: { "border-color": "#0c2340", "border-width": 4 } },
+        { selector: ".dim", style: { opacity: 0.1 } },
+        { selector: "edge.trail", style: { "line-color": "#ff6b4a", "target-arrow-color": "#ff6b4a", opacity: 1, width: 5, "z-index": 9 } },
+        { selector: "edge.trail-now", style: { "line-color": "#ef476f", "target-arrow-color": "#ef476f", width: 9, opacity: 1 } },
+        { selector: "node.trail", style: { opacity: 1, "border-color": "#ff6b4a", "border-width": 4 } },
       ],
       layout: { name: "preset" },
       userZoomingEnabled: false, // page scroll must not zoom the graph; use the buttons (as in MuleGuard)
@@ -107,6 +113,33 @@ export default function Graph({ data, onSelect, height = 540 }) {
     cyRef.current = cy;
     return () => { cy.elements().stop(true, false); ro.disconnect(); cy.destroy(); };
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => clearInterval(timer.current), []);
+  const startReplay = async () => {
+    const cy = cyRef.current;
+    if (!cy || !loadTrail) return;
+    clearInterval(timer.current);
+    const events = await loadTrail();
+    if (!events.length) return;
+    const edgeOf = {};
+    cy.edges().forEach((e) => { edgeOf[`${e.data("source")}|${e.data("target")}`] = e; });
+    cy.elements().removeClass("trail trail-now").addClass("dim");
+    let i = 0;
+    const step = Math.max(120, Math.min(600, 9000 / events.length));
+    timer.current = setInterval(() => {
+      if (i >= events.length) { clearInterval(timer.current); cy.edges().removeClass("trail-now"); setReplay((r) => r && { ...r, done: true }); return; }
+      const ev = events[i];
+      cy.edges().removeClass("trail-now");
+      const e = edgeOf[`${ev.source}|${ev.target}`];
+      if (e) {
+        e.removeClass("dim").addClass("trail trail-now");
+        e.source().removeClass("dim").addClass("trail");
+        e.target().removeClass("dim").addClass("trail");
+      }
+      setReplay({ i: i + 1, n: events.length, ts: ev.ts, amount: ev.amount, src: ev.source, dst: ev.target });
+      i += 1;
+    }, step);
+  };
+  const resetReplay = () => { clearInterval(timer.current); cyRef.current?.elements().removeClass("dim trail trail-now"); setReplay(null); };
   const zoom = (k) => { const cy = cyRef.current; if (cy) cy.animate({ zoom: { level: cy.zoom() * k, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } } }, { duration: 200 }); };
   return (
     <div style={{ position: "relative" }}>
@@ -116,6 +149,16 @@ export default function Graph({ data, onSelect, height = 540 }) {
         <button className="small subtle" title="Zoom out" onClick={() => zoom(1 / 1.3)}>－</button>
         <button className="small subtle" title="Fit to view" onClick={() => cyRef.current?.animate({ fit: { padding: 30 } }, { duration: 250 })}>⤢</button>
       </div>
+      {loadTrail && (
+        <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", maxWidth: "75%" }}>
+          <button className="small warm" onClick={startReplay}>▶ Replay money trail</button>
+          {replay && <button className="small subtle" onClick={resetReplay}>Reset</button>}
+          {replay && (
+            <span className="pill" style={{ background: "#fff", color: "var(--ink)", boxShadow: "var(--shadow)" }}>
+              {replay.done ? "✓ " : "⏱ "}{replay.ts.slice(0, 16)} · <b>{replay.src}</b> → <b>{replay.dst}</b> · ₹{Math.round(replay.amount).toLocaleString("en-IN")} · {replay.i}/{replay.n}
+            </span>)}
+        </div>
+      )}
     </div>
   );
 }

@@ -94,8 +94,8 @@ def main():
     m["chosen_model"] = chosen
     m["model_version"] = m["model_version"].replace("xgb", "lr" if chosen == "logistic_regression" else "xgb")
     joblib.dump({"model": lr if chosen == "logistic_regression" else xgb, "features": CREDIT_FEATURES,
-                 "version": m["model_version"], "kind": chosen}, ARTIFACT_DIR / "credit_model.joblib")
-    (ARTIFACT_DIR / "credit_metrics.json").write_text(json.dumps(m, indent=2))
+                 "version": m["model_version"], "kind": chosen}, ARTIFACT_DIR / "credit_model_synthetic.joblib")
+    (ARTIFACT_DIR / "credit_metrics_synthetic.json").write_text(json.dumps(m, indent=2))
     card = f"""# Cash-flow Repayment-Risk Model — Model Card
 
 **Version:** {m['model_version']} · trained {m['trained_at']}
@@ -128,7 +128,7 @@ Calibration (XGBoost, quantile bins): `{json.dumps(m['calibration_xgb'])}`
 `{', '.join(CREDIT_FEATURES)}`: all are derived from the user's own consented statement (see `finlens/credit_features.py`).
 """
     (ROOT / "docs").mkdir(exist_ok=True)
-    (ROOT / "docs" / "CREDIT_MODEL_CARD.md").write_text(card, encoding="utf-8")
+    (ROOT / "docs" / "CREDIT_MODEL_CARD_SYNTHETIC.md").write_text(card, encoding="utf-8")
     print(json.dumps({k: m[k] for k in ["xgboost", "logistic_regression", "constant_baseline", "train_event_rate", "test_event_rate", "chosen_model"]}, indent=2))
 
 

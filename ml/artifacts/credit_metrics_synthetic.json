@@ -1,0 +1,102 @@
+{
+  "data": "SYNTHETIC applicants; target = SIMULATED repayment outcome (missed >=2 instalments in 12 months). Not real lending data.",
+  "validation": "temporal: train months 1-18, test months 19-24 (drift injected)",
+  "train_rows": 14975,
+  "test_rows": 5025,
+  "train_event_rate": 0.0433,
+  "test_event_rate": 0.0581,
+  "xgboost": {
+    "roc_auc": 0.7786,
+    "pr_auc": 0.26,
+    "brier": 0.0493
+  },
+  "logistic_regression": {
+    "roc_auc": 0.7974,
+    "pr_auc": 0.2874,
+    "brier": 0.0485
+  },
+  "constant_baseline": {
+    "roc_auc": 0.5,
+    "pr_auc": 0.0581,
+    "brier": 0.055
+  },
+  "calibration_xgb": [
+    {
+      "mean_predicted": 0.004,
+      "observed": 0.003
+    },
+    {
+      "mean_predicted": 0.007,
+      "observed": 0.016
+    },
+    {
+      "mean_predicted": 0.012,
+      "observed": 0.025
+    },
+    {
+      "mean_predicted": 0.017,
+      "observed": 0.027
+    },
+    {
+      "mean_predicted": 0.026,
+      "observed": 0.041
+    },
+    {
+      "mean_predicted": 0.039,
+      "observed": 0.07
+    },
+    {
+      "mean_predicted": 0.065,
+      "observed": 0.072
+    },
+    {
+      "mean_predicted": 0.176,
+      "observed": 0.21
+    }
+  ],
+  "feature_importance": [
+    [
+      "obligation_ratio",
+      0.206
+    ],
+    [
+      "savings_rate",
+      0.1791
+    ],
+    [
+      "proposed_emi_ratio",
+      0.1688
+    ],
+    [
+      "income_cv",
+      0.0945
+    ],
+    [
+      "cashflow_trend",
+      0.0818
+    ],
+    [
+      "balance_to_income",
+      0.058
+    ],
+    [
+      "months_history",
+      0.0566
+    ],
+    [
+      "avg_monthly_income",
+      0.0555
+    ],
+    [
+      "discretionary_ratio",
+      0.0517
+    ],
+    [
+      "essential_ratio",
+      0.0481
+    ]
+  ],
+  "trained_at": "2026-11-13 00:07:49",
+  "model_version": "credit-lr-202611130007",
+  "chosen_model": "logistic_regression"
+}

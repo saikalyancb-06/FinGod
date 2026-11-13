@@ -41,7 +41,7 @@ export function Stat({ label, value, sub, icon, color = "emerald", format }) {
     <div className={`card stat lift c-${color}`}>
       {icon && <div className="stat-ico">{icon}</div>}
       <div className="label">{label}</div>
-      <div className="value">{typeof value === "number" ? <CountUp value={value} format={format} /> : value}</div>
+      <div className="value">{value == null ? "—" : typeof value === "number" ? <CountUp value={value} format={format} /> : value}</div>
       {sub && <div className="sub">{sub}</div>}
     </div>
   );

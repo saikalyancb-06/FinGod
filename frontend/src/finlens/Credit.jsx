@@ -3,6 +3,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceL
 import { fin, inr, kfmt } from "../api.js";
 import { CountUp } from "../ui.jsx";
 import { CashflowScore, LenderModel } from "./CreditScore.jsx";
+import CreditBuilder from "./CreditBuilder.jsx";
 
 const STATUS = {
   eligible: ["✅ Likely affordable", "linear-gradient(135deg,#00a676,#7cc243)"],
@@ -135,6 +136,12 @@ export default function Credit({ me, onConsent }) {
               {res.model_signal && (
                 <div className="notice info" style={{ marginTop: 10 }}>
                   <b>Model signal: {res.model_signal.band} risk</b> ({(res.model_signal.modelled_probability * 100).toFixed(1)}%)<br />
+                  {res.model_signal.observed_default_rate_in_band != null && (
+                    <span className="small">In real 2015 loans, <b>{(res.model_signal.observed_default_rate_in_band * 100).toFixed(1)}%</b> of borrowers in this band did not repay.<br /></span>
+                  )}
+                  {res.model_signal.outside_training_range?.length > 0 && (
+                    <span className="small" style={{ color: "#9a5b00" }}>⚠️ Your {res.model_signal.outside_training_range.map((f) => ({ emi_ratio: "EMI-to-income ratio", term_months: "loan term", obligation_ratio: "existing-debt ratio", total_debt_ratio: "total debt ratio" }[f] || f)).join(" and ")} {res.model_signal.outside_training_range.length > 1 ? "are" : "is"} outside the range of the training loans, so the value was capped. Read this band with extra caution.<br /></span>
+                  )}
                   <span className="small">{res.model_signal.label_meaning} {res.model_signal.caveat}</span>
                 </div>
               )}
@@ -144,7 +151,8 @@ export default function Credit({ me, onConsent }) {
         </div>
       )}
       {consent && me.transactions > 0 && <CashflowScore />}
-      {consent && me.transactions > 0 && <LenderModel principal={f.principal} months={f.months} />}
+      {consent && <CreditBuilder />}
+      {consent && (me.transactions > 0 || me.profile?.completed) && <LenderModel principal={f.principal} months={f.months} rate={f.annual_rate_pct} affordability={res?.status} />}
     </div>
   );
 }

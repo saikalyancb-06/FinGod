@@ -26,6 +26,9 @@ def extract(df: pd.DataFrame, proposed_emi: float = 0.0, declared_obligations: f
     sp = spend_df(df)
     obligations = sp[sp["subcategory"].isin(["Loan repayment", "Card repayment"])]
     obl_monthly = (obligations.groupby("month")["amount"].sum().mean() if len(obligations) else 0.0) + declared_obligations
+    # loan/card repayments are tagged essential by the categoriser; they are counted once, as obligations
+    obl_by_month = obligations.groupby("month")["amount"].sum() if len(obligations) else pd.Series(dtype=float)
+    ess = np.array([max(0.0, e - float(obl_by_month.get(m["month"], 0.0))) for e, m in zip(ess, months)], dtype=float)
 
     avg_inc = float(inc.mean()) if len(inc) else 0.0
     bal = df[df["balance"].notna()]["balance"] if "balance" in df else pd.Series(dtype=float)
