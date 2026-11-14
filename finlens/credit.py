@@ -55,6 +55,48 @@ def _model():
     return joblib.load(p) if p.exists() else None
 
 
+def expected_loss(pd_: float, principal: float, months: int) -> dict | None:
+    """Expected Loss = PD x LGD x EAD (Basel-style decomposition).
+    PD  - model probability the loan is charged off over its life
+    EAD - principal still owed at default = principal x average share outstanding when Lending Club loans defaulted
+    LGD - exposure-weighted loss after recoveries on charged-off Lending Club loans (ml/credit_loss_params.py)"""
+    import json
+    p = ARTIFACT_DIR / "credit_loss_params.json"
+    if not p.exists() or principal <= 0:
+        return None
+    lp = json.loads(p.read_text())
+    term = lp.get("by_term", {}).get("60_months" if months > 36 else "36_months", {})
+    lgd = float(lp["lgd_exposure_weighted"])
+    ead_share = float(term.get("ead_share_at_default_mean") or lp["ead_share_at_default_mean"])
+    ead = principal * ead_share
+    el = pd_ * lgd * ead
+    years = max(months / 12.0, 1 / 12)
+    return {"pd": round(pd_, 4), "lgd": round(lgd, 4), "ead": round(ead, 2), "ead_share": round(ead_share, 4),
+            "expected_loss": round(el, 2), "expected_loss_pct": round(el / principal * 100, 2),
+            "annual_loss_rate_pct": round(el / principal / years * 100, 2),
+            "formula": "EL = PD × LGD × EAD",
+            "explanation": (f"Out of ₹{principal:,.0f}, a lender expects to lose about ₹{el:,.0f} on average "
+                            f"({pd_ * 100:.1f}% chance of default × {lgd * 100:.0f}% lost after recoveries × ₹{ead:,.0f} still owed at default). "
+                            f"Spread over the loan, that's ~{el / principal / years * 100:.1f}% a year that the interest rate must cover before any profit."),
+            "source": f"LGD and EAD measured on {lp['charged_off_loans']:,} charged-off Lending Club loans (US); Indian recoveries differ."}
+
+
+def _calibration_evidence(p: float) -> dict | None:
+    """Is a predicted PD trustworthy? Compare with what actually happened to similar predictions (2015 test year)."""
+    import json
+    try:
+        r = json.loads((ARTIFACT_DIR / "credit_metrics.json").read_text())["results"]["deployed_xgboost_finlens_features"]
+    except Exception:
+        return None
+    curve = r.get("calibration") or []
+    if not curve:
+        return None
+    near = min(curve, key=lambda c: abs(c["predicted"] - p))
+    return {"brier": r.get("brier"), "base_rate": r.get("base_rate"), "curve": curve, "nearest_bin": near,
+            "text": (f"Among 2015 loans the model scored about {near['predicted'] * 100:.0f}%, {near['observed'] * 100:.0f}% actually defaulted, "
+                     f"so this probability is {'well calibrated' if abs(near['predicted'] - near['observed']) < 0.03 else 'only roughly calibrated'}.")}
+
+
 def _risk_band(feats: dict, principal: float = 0.0, months: int = 12) -> dict | None:
     m = _model()
     if not m:
@@ -87,6 +129,8 @@ def _risk_band(feats: dict, principal: float = 0.0, months: int = 12) -> dict | 
             pass
         return {"modelled_probability": round(p, 3), "band": band, "model_version": m["version"],
                 "observed_default_rate_in_band": observed,
+                "expected_loss": expected_loss(p, principal, months),
+                "calibration": _calibration_evidence(p),
                 "inputs": {k: round(v, 3) for k, v in row.items() if k in m["features"]},
                 "outside_training_range": [f for f in outside if f in m["features"]],
                 "label_meaning": "Estimated probability that a loan with these affordability ratios was charged off, learned from "

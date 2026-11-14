@@ -78,6 +78,7 @@ class Alert(Base):
     ring_ids: Mapped[list] = mapped_column(JSON, default=list)
     pattern_score: Mapped[float] = mapped_column(Float, default=0.0)
     priority_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    risk: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # risk_engine profile: components, uncertainty, priority
     model_reliable: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(30), default="open")
     assigned_to: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -114,6 +115,8 @@ def init_db():
             conn.execute(text("ALTER TABLE alerts ADD COLUMN priority_reason VARCHAR(80)"))
         if "model_reliable" not in cols:
             conn.execute(text("ALTER TABLE alerts ADD COLUMN model_reliable BOOLEAN DEFAULT 1"))
+        if "risk" not in cols:
+            conn.execute(text("ALTER TABLE alerts ADD COLUMN risk JSON"))
 
 
 init_db()

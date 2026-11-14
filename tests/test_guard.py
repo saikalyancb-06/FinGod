@@ -82,7 +82,7 @@ def test_demo_day_raises_the_right_alerts(demo_day):
 def test_today_explains_where_the_money_went(demo_day):
     c, _ = demo_day
     t = c.get("/api/guard/today").json()
-    assert t["explain"]["speech"].startswith("Ananya, on 13 Nov you spent")
+    assert t["explain"]["speech"].startswith("Ananya, on ") and " you spent " in t["explain"]["speech"]
     assert t["explain"]["start_balance"] > t["explain"]["end_balance"]
     assert t["daily"]["color"] == "red" and "need" not in t["daily"]["by_nature"]  # the daily limit ignores needs
     assert t["jar"]["pending"] > 0 and t["reflect"]

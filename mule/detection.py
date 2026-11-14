@@ -87,6 +87,7 @@ def analyze(df: pd.DataFrame) -> dict:
 
     alerts = []
     suppressed = 0
+    suppressed_accounts: list[dict] = []
     for acct in res.features.index:
         ev = res.evidence[acct]
         fams = rule_families(ev)
@@ -96,6 +97,8 @@ def analyze(df: pd.DataFrame) -> dict:
             continue
         if ev.get("high_volume_merchant") and pr != "high":
             suppressed += 1
+            suppressed_accounts.append({"account": acct, "would_be_priority": pr, "rule_families": fams,
+                                        "reason": "matches a high-volume merchant profile (many counterparties over many days)"})
             continue
         expl = explain(acct, ev)
         if not reliable:
@@ -132,4 +135,4 @@ def analyze(df: pd.DataFrame) -> dict:
     alerts.sort(key=lambda a: (order[a["priority"]], -a["model_score"]))
     return {"features": res.features, "evidence": res.evidence, "scores": score_map, "threshold": thr,
             "model_version": version, "alerts": alerts, "rings": rings, "graph": res.graph,
-            "suppressed_merchant_alerts": suppressed, "model_applicable": dataset_ok, "model_note": model_note}
+            "suppressed_merchant_alerts": suppressed, "suppressed_accounts": suppressed_accounts, "model_applicable": dataset_ok, "model_note": model_note}

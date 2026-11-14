@@ -25,6 +25,7 @@ from shared.audit import setup_logging
 from shared.security import hash_password, make_token, read_token, verify_password
 
 from . import live
+from . import risk_engine as RE
 from .db import Account, Alert, AuditLog, CaseNote, Dataset, Investigator, SessionLocal, Transaction, cipher, init_db
 from .detection import analyze, load_model
 from .features import SchemaError, normalize_transactions
@@ -39,8 +40,9 @@ STATUSES = {
     "open": "New alert, not yet reviewed",
     "in_review": "An investigator is reviewing the evidence",
     "escalated": "Referred to a lead investigator",
-    "closed_no_concern": "Reviewed - activity explained / no further action",
-    "closed_reported": "Reviewed - referred for reporting under the institution's process",
+    "insufficient_evidence": "Reviewed - not enough evidence to decide either way",
+    "closed_no_concern": "False positive - activity explained, no further action",
+    "closed_reported": "Confirmed suspicious - referred for reporting under the institution's process",
 }
 LEAD_ONLY = {"closed_no_concern", "closed_reported"}
 
@@ -112,13 +114,20 @@ def _persist_analysis(db, ds: Dataset, df_real: pd.DataFrame, alias: dict[str, s
     df_alias = df_real.assign(src=df_real["src"].map(alias), dst=df_real["dst"].map(alias))
     out = analyze(df_alias)
     feats = out["features"]
+    try:
+        prof = RE.profiles(df_alias, out, (ds.summary or {}).get("risk_weights"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("risk engine failed: %s", exc)
+        prof = {"accounts": {}, "communities": [], "weights": RE.DEFAULT_WEIGHTS}
+    for a in out["alerts"]:
+        a["risk"] = json.loads(json.dumps(prof["accounts"].get(a["account"]), default=str)) if a["account"] in prof["accounts"] else None
     existing = {a.alias: a for a in db.scalars(select(Account).where(Account.dataset_id == ds.id))}
     for real, al in alias.items():
         if al not in feats.index:
             continue
         row = existing.get(al) or Account(dataset_id=ds.id, alias=al, real_enc=cipher.encrypt(real))
         row.features = {k: float(v) for k, v in feats.loc[al].items()}
-        row.evidence = json.loads(json.dumps(out["evidence"][al], default=str))
+        row.evidence = json.loads(json.dumps({**out["evidence"][al], "risk": prof["accounts"].get(al)}, default=str))
         row.model_score = float(out["scores"][al])
         if al not in existing:
             db.add(row)
@@ -145,6 +154,12 @@ def _persist_analysis(db, ds: Dataset, df_real: pd.DataFrame, alias: dict[str, s
         "fraud_rings": len(out["rings"]), "suppressed_merchant_alerts": out["suppressed_merchant_alerts"],
         "processing_time_seconds": round(time.perf_counter() - t0, 3),
         "model_applicable": out["model_applicable"], "model_note": out["model_note"],
+        "risk_weights": prof["weights"], "uncertainty_model": prof.get("uncertainty_model"),
+        "risk_labels": pd.Series([p["label"] for p in prof["accounts"].values()]).value_counts().to_dict() if prof["accounts"] else {},
+        "flagged_exposure": round(sum(prof["accounts"][a["account"]]["exposure"] for a in al_ if a["account"] in prof["accounts"]), 2),
+        "networks": [{k: (v[:60] if k == "members" else v) for k, v in c.items()}
+                     for c in sorted(prof["communities"], key=lambda c: (-c["flagged"], -c["flow"])) if c["suspicious"]][:40],
+        "suppressed_merchants": out.get("suppressed_accounts", []),
     }
     if prev_eval:
         changed = prev_eval.get("alerts_at_evaluation") != len(al_)
@@ -369,7 +384,7 @@ def _404(what):
 
 @app.get("/api/datasets/{ds_id}/alerts")
 def alerts(ds_id: int, q: str | None = None, priority: str | None = None, status: str | None = None, rule: str | None = None,
-           who: Who = Depends(current)):
+           sort: str = "priority_score", label: str | None = None, who: Who = Depends(current)):
     with SessionLocal() as db:
         stmt = select(Alert).where(Alert.dataset_id == ds_id)
         if q:
@@ -381,8 +396,13 @@ def alerts(ds_id: int, q: str | None = None, priority: str | None = None, status
         rows = db.scalars(stmt).all()
         if rule:
             rows = [a for a in rows if rule in a.rule_families]
+        if label:
+            rows = [a for a in rows if (a.risk or {}).get("label") == label]
         order = {"high": 0, "medium": 1, "low": 2}
-        rows.sort(key=lambda a: (order.get(a.priority, 3), -a.model_score))
+        if sort == "priority_score":
+            rows.sort(key=lambda a: -((a.risk or {}).get("priority") or 0))
+        else:
+            rows.sort(key=lambda a: (order.get(a.priority, 3), -a.model_score))
         audit(db, who, "search_alerts", f"dataset:{ds_id}", q=q, priority=priority, status=status, rule=rule)
         db.commit()
         return [_alert_dict(a) for a in rows]
@@ -392,7 +412,7 @@ def _alert_dict(a: Alert) -> dict:
     return {"id": a.id, "dataset_id": a.dataset_id, "account": a.account, "priority": a.priority, "model_score": a.model_score,
             "rule_families": a.rule_families, "explanation": a.explanation, "linked_alerts": a.linked_alerts, "status": a.status,
             "ring_ids": a.ring_ids or [], "pattern_score": a.pattern_score,
-            "priority_reason": a.priority_reason, "model_reliable": a.model_reliable if a.model_reliable is not None else True,
+            "priority_reason": a.priority_reason, "risk": a.risk, "model_reliable": a.model_reliable if a.model_reliable is not None else True,
             "status_meaning": STATUSES.get(a.status), "assigned_to": a.assigned_to, "reviewed_by": a.reviewed_by,
             "created_at": a.created_at, "updated_at": a.updated_at}
 
@@ -821,3 +841,159 @@ def money_trail(ds_id: int, account: str, hops: int = Query(default=2, ge=1, le=
         rows = sorted(rows, key=lambda r: 0 if t0 <= r[0] <= t1 else min(abs((r[0] - t0).total_seconds()), abs((r[0] - t1).total_seconds())))[:limit]
         rows.sort(key=lambda r: r[0])
     return [{"ts": str(t), "source": s, "target": d, "amount": round(a, 2)} for t, s, d, a in rows[:limit]]
+
+
+# ---------------- quantitative risk intelligence ----------------
+def _ds_df(db, ds_id: int) -> pd.DataFrame:
+    rows = db.execute(select(Transaction.txn_id, Transaction.ts, Transaction.src, Transaction.dst, Transaction.amount, Transaction.channel)
+                      .where(Transaction.dataset_id == ds_id)).all()
+    df = pd.DataFrame(rows, columns=["txn_id", "timestamp", "src", "dst", "amount", "channel"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    return df
+
+
+@app.get("/api/datasets/{ds_id}/risk")
+def risk_overview(ds_id: int, label: str | None = None, flagged_only: bool = False, limit: int = Query(default=300, le=5000),
+                  who: Who = Depends(current)):
+    """Every account's risk profile: components, contributions, uncertainty and priority."""
+    with SessionLocal() as db:
+        ds = db.get(Dataset, ds_id) or _404("Dataset")
+        alerted = {a.account: a.id for a in db.scalars(select(Alert).where(Alert.dataset_id == ds_id))}
+        accts = []
+        for a in db.scalars(select(Account).where(Account.dataset_id == ds_id)):
+            r = (a.evidence or {}).get("risk")
+            if not r or (flagged_only and a.alias not in alerted) or (label and r["label"] != label):
+                continue
+            accts.append({"account": a.alias, "alert_id": alerted.get(a.alias), **r})
+        audit(db, who, "view_risk", f"dataset:{ds_id}")
+        db.commit()
+        summary = ds.summary or {}
+    accts.sort(key=lambda x: -x["composite"])
+    hist = [0] * 10
+    for x in accts:
+        hist[min(9, int(x["composite"] // 10))] += 1
+    return {"accounts": accts[:limit], "total": len(accts), "histogram": [{"bucket": f"{i * 10}-{i * 10 + 9}", "accounts": n} for i, n in enumerate(hist)],
+            "labels": summary.get("risk_labels", {}), "weights": summary.get("risk_weights", RE.DEFAULT_WEIGHTS),
+            "priority_weights": RE.PRIORITY_WEIGHTS, "networks": summary.get("networks", []),
+            "flagged_exposure": summary.get("flagged_exposure"), "uncertainty_model": summary.get("uncertainty_model"),
+            "methodology": RE.__doc__}
+
+
+class WeightsIn(BaseModel):
+    ml: float = Field(ge=0, le=1)
+    account: float = Field(ge=0, le=1)
+    network: float = Field(ge=0, le=1)
+    transaction: float = Field(ge=0, le=1)
+
+
+@app.put("/api/datasets/{ds_id}/risk-weights")
+def set_risk_weights(ds_id: int, body: WeightsIn, who: Who = Depends(current)):
+    w = body.model_dump()
+    if sum(w.values()) <= 0:
+        raise HTTPException(400, "At least one weight must be above 0")
+    with SessionLocal() as db:
+        ds = db.get(Dataset, ds_id) or _404("Dataset")
+        ds.summary = {**(ds.summary or {}), "risk_weights": w}
+        audit(db, who, "set_risk_weights", f"dataset:{ds_id}", **w)
+        db.commit()
+    return reanalyse(ds_id)
+
+
+@app.get("/api/datasets/{ds_id}/trace")
+def trace_funds(ds_id: int, account: str, direction: str = Query(default="down", pattern="^(down|up|both)$"),
+                hops: int = Query(default=3, ge=1, le=6), start: datetime | None = None, end: datetime | None = None,
+                min_amount: float = Query(default=0, ge=0), who: Who = Depends(current)):
+    with SessionLocal() as db:
+        db.get(Dataset, ds_id) or _404("Dataset")
+        df = _ds_df(db, ds_id)
+        risk = {a.alias: (a.evidence or {}).get("risk", {}) for a in db.scalars(select(Account).where(Account.dataset_id == ds_id))}
+        audit(db, who, "trace_funds", f"dataset:{ds_id}/{account}", direction=direction, hops=hops)
+        db.commit()
+    if account not in set(df["src"]) | set(df["dst"]):
+        raise HTTPException(404, "Account not in this dataset")
+    out = RE.trace(df, account, direction, hops, start, end, min_amount)
+    out["risk"] = {a: {"composite": (risk.get(a) or {}).get("composite"), "label": (risk.get(a) or {}).get("label")} for a in out["levels"]}
+    return out
+
+
+_TX_CACHE: dict = {}
+
+
+@app.get("/api/datasets/{ds_id}/transactions")
+def transaction_explorer(ds_id: int, account: str | None = None, start: datetime | None = None, end: datetime | None = None,
+                         min_amount: float | None = None, max_amount: float | None = None, min_risk: float = Query(default=0, ge=0, le=1),
+                         signal: str | None = None, sort: str = Query(default="risk", pattern="^(risk|time|amount)$"),
+                         page: int = Query(default=1, ge=1), size: int = Query(default=50, ge=10, le=200), who: Who = Depends(current)):
+    with SessionLocal() as db:
+        ds = db.get(Dataset, ds_id) or _404("Dataset")
+        n = ds.summary.get("transactions")
+        key = (ds_id, n, ds.updated_at if hasattr(ds, "updated_at") else None)
+        if key not in _TX_CACHE:
+            _TX_CACHE.clear()
+            _TX_CACHE[key] = RE.transaction_scores(_ds_df(db, ds_id))
+        audit(db, who, "explore_transactions", f"dataset:{ds_id}", account=account)
+        db.commit()
+    t = _TX_CACHE[key]
+    if account:
+        t = t[(t["src"] == account) | (t["dst"] == account)]
+    if start is not None:
+        t = t[t["timestamp"] >= pd.Timestamp(start)]
+    if end is not None:
+        t = t[t["timestamp"] <= pd.Timestamp(end)]
+    if min_amount is not None:
+        t = t[t["amount"] >= min_amount]
+    if max_amount is not None:
+        t = t[t["amount"] <= max_amount]
+    if min_risk:
+        t = t[t["risk"] >= min_risk]
+    if signal:
+        t = t[t["signals"].map(lambda s: signal in s)]
+    t = t.sort_values({"risk": "risk", "time": "timestamp", "amount": "amount"}[sort], ascending=False)
+    total = len(t)
+    pg = t.iloc[(page - 1) * size: page * size]
+    return {"total": total, "page": page, "size": size,
+            "rows": [{"txn_id": r.txn_id, "ts": str(r.timestamp), "src": r.src, "dst": r.dst, "amount": round(float(r.amount), 2),
+                      "risk": round(float(r.risk), 3), "z": float(r.z), "signals": r.signals} for r in pg.itertuples()],
+            "signals": ["unusual amount", "night-time", "structuring band", "repeated pair", "burst"],
+            "method": "Noisy-OR of: robust z-score of log amount vs the sender's own history (median/MAD), night-time, "
+                      "₹45-50k structuring band, >=3 repeats of the same pair in 24h, and bursts within an hour."}
+
+
+@app.get("/api/datasets/{ds_id}/fp-analysis")
+def fp_analysis(ds_id: int, who: Who = Depends(current)):
+    """What investigators decided, how precise each signal has been, and what was suppressed (and why)."""
+    with SessionLocal() as db:
+        ds = db.get(Dataset, ds_id) or _404("Dataset")
+        al = db.scalars(select(Alert).where(Alert.dataset_id == ds_id)).all()
+    by_status = pd.Series([a.status for a in al]).value_counts().to_dict() if al else {}
+    decided = [a for a in al if a.status in ("closed_reported", "closed_no_concern")]
+    conf = sum(1 for a in decided if a.status == "closed_reported")
+
+    def rate(rows):
+        d = [a for a in rows if a.status in ("closed_reported", "closed_no_concern")]
+        c = sum(1 for a in d if a.status == "closed_reported")
+        return {"reviewed": len(d), "confirmed": c, "false_positive": len(d) - c,
+                "precision": round(c / len(d), 3) if d else None}
+
+    fams = sorted({f for a in al for f in a.rule_families})
+    labels = sorted({(a.risk or {}).get("label") for a in al if a.risk})
+    return {
+        "alerts": len(al), "by_status": by_status, "statuses": STATUSES,
+        "reviewed": len(decided), "confirmed": conf, "false_positives": len(decided) - conf,
+        "precision_of_reviewed": round(conf / len(decided), 3) if decided else None,
+        "by_rule_family": {f: rate([a for a in al if f in a.rule_families]) for f in fams},
+        "by_confidence_label": {lb: rate([a for a in al if (a.risk or {}).get("label") == lb]) for lb in labels},
+        "by_priority": {p: rate([a for a in al if a.priority == p]) for p in ("high", "medium", "low")},
+        "suppressed": (ds.summary or {}).get("suppressed_merchants", []),
+        "suppression_policy": "High-volume merchant profiles alert only at high priority. Suppressed accounts are listed here, never hidden.",
+        "evaluation": (ds.summary or {}).get("evaluation"),
+        "note": "Precision here is measured from investigator decisions; it is only as reliable as the number of reviewed alerts.",
+    }
+
+
+@app.get("/api/model/comparison")
+def model_comparison(who: Who = Depends(current)):
+    p = config.ARTIFACT_DIR / "mule_model_comparison.json"
+    if not p.exists():
+        raise HTTPException(404, "Run: python -m ml.compare_mule_models")
+    return json.loads(p.read_text())

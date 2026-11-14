@@ -1094,6 +1094,25 @@ def sample_statement():
     return FileResponse(config.ROOT / "data" / "samples" / "finlens_sample_statement.csv", filename="finlens_sample_statement_SYNTHETIC.csv")
 
 
+# ---------------- Risk Lab: Monte Carlo cash-flow simulation ----------------
+@app.get("/api/risklab")
+def risklab(days: int | None = Query(default=None, ge=7, le=120), cut_wants_pct: float = Query(default=0, ge=0, le=100),
+            paths: int = Query(default=10000, ge=1000, le=50000), seed: int = 42, uid: int = Depends(current_user)):
+    from . import risklab as RL
+    from .guard_routes import _Bundle
+    with SessionLocal() as db:
+        require_consent(db, uid, "analytics")
+        if not db.query(Txn).filter(Txn.user_id == uid).count():
+            raise HTTPException(404, "No transactions yet - upload a statement first")
+        b = _Bundle(db, uid)
+        buffer = db.get(Settings, uid).emergency_buffer
+    out = RL.simulate(b.df, b.ctx, b.ctx.get("goals", []), buffer, days, cut_wants_pct, paths, seed, b.adf["nature"])
+    if out.get("available") and cut_wants_pct == 0 and out["inputs"]["want_share"] > 0:
+        alt = RL.simulate(b.df, b.ctx, [], buffer, days, 30, paths, seed, b.adf["nature"])
+        out["what_if_cut_30"] = {"p_run_out": alt["p_run_out"], "var95": alt["var95"], "p50_end": alt["end_balance"]["p50"]}
+    return out
+
+
 # ---------------- Spend Guard (live alerts, need/want, limits...) ----------------
 from .guard_routes import router as guard_router  # noqa: E402  (imported last: it uses the helpers above)
 

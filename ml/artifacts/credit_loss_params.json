@@ -1,0 +1,29 @@
+{
+  "source": "Lending Club accepted loans 2007-2018Q4 (real loans, real recoveries; CC0)",
+  "charged_off_loans": 269338,
+  "lgd_mean": 0.9087,
+  "lgd_median": 0.9155,
+  "lgd_exposure_weighted": 0.9098,
+  "lgd_p10_p90": [
+    0.8196,
+    1.0
+  ],
+  "ead_share_at_default_mean": 0.6973,
+  "by_term": {
+    "36_months": {
+      "loans": 163912,
+      "lgd_mean": 0.9071,
+      "lgd_median": 0.9159,
+      "ead_share_at_default_mean": 0.6427
+    },
+    "60_months": {
+      "loans": 105426,
+      "lgd_mean": 0.9111,
+      "lgd_median": 0.9148,
+      "ead_share_at_default_mean": 0.782
+    }
+  },
+  "formula": "LGD = (principal outstanding at default - net recoveries) / principal outstanding at default",
+  "caveat": "US unsecured consumer loans; Indian recovery rates differ (collections, legal process). Used as a transparent, data-based assumption.",
+  "seconds": 14.0
+}
